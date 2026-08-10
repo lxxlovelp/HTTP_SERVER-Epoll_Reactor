@@ -1,121 +1,245 @@
+#include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <sys/epoll.h>
+#include <sys/socket.h>
+#include "../network/http.h"
 #include "../network/socket.h"
 #include "epoll_server.h"
-#include "../network/http.h"
-#include "../Tool/json.h"
-#include"../Tool/send.h"
+
+#define LISTENER_TAG UINT64_C(1)
 
 
+typedef struct {
+    int fd;
+    char request[MAX_REQUEST_SIZE + 1];
+    size_t request_len;
+    char *response;
+    size_t response_len;
+    size_t response_sent;
+} Connection;
 
-struct epoll_event events[MAX_EVENTS];  //事件类型 + 之前保存的data
+static struct epoll_event events[MAX_EVENTS];
 
 
- int add_fd_to_epoll(int epoll_fd, int fd)
+static void close_connection(int epoll_fd, Connection *conn)
 {
-    struct epoll_event ev;
-    ev.events = EPOLLIN | EPOLLET;//设置为边缘触发模式+监听可读事件
-    ev.data.fd = fd;// 保存文件描述符，事件发生时返回
-    
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1) {//将文件描述符添加到epoll实例中
-        perror("epoll_ctl ADD");
+    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
+    close(conn->fd);
+    free(conn->response);
+    free(conn);
+}
+
+
+static int modify_connection_events(int epoll_fd, Connection *conn, uint32_t mask)
+{
+    struct epoll_event ev = {0};
+    ev.events = mask | EPOLLRDHUP;// 保留 EPOLLRDHUP 事件，避免客户端关闭连接时无法检测
+    ev.data.ptr = conn;
+    return epoll_ctl(epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev);
+}
+
+
+
+static int add_connection(int epoll_fd, int fd)
+{
+    Connection *conn = calloc(1, sizeof(*conn));
+    if (conn == NULL) {
+        return -1;
+    }
+    conn->fd = fd;
+
+    struct epoll_event ev = {0};// 初始化 epoll_event 结构体
+    ev.events = EPOLLIN | EPOLLRDHUP;
+    ev.data.ptr = conn;
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1) {
+        free(conn);
         return -1;
     }
     return 0;
 }
 
 
-
-int epoll_wait_loop(int epoll_fd, int listen_fd)
+int add_fd_to_epoll(int epoll_fd, int fd)
 {
-   while (1) {//无限循环等待事件发生
-        int n = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);//等待事件发生，返回发生事件的数量
-        if (n == -1) {
-            if (errno == EINTR) continue;//如果是被信号中断，继续等待
-            perror("epoll_wait");
-            return -1;
-        }
-
-        for (int i = 0; i < n; ++i) {//遍历所有发生的事件
-            int fd = events[i].data.fd;
-            uint32_t ev = events[i].events;
-
-            if (fd == listen_fd) {
-                /* 有新连接，边缘触发需循环 accept 直到 EAGAIN */
-                while (1) {
-                    struct sockaddr_in cli_addr;//保存客户端地址信息
-                    socklen_t cli_len = sizeof(cli_addr);//保存客户端地址长度
-                    int client_fd = accept(listen_fd, (struct sockaddr *)&cli_addr, &cli_len);//接受新连接，返回客户端套接字描述符
-                    if (client_fd == -1) {//如果accept返回-1，说明没有新的连接或者发生错误
-                        if (errno == EAGAIN || errno == EWOULDBLOCK) break;//如果没有新的连接，跳出循环
-                        perror("accept");
-                        break;
-                    }
-
-                    if (set_nonblock(client_fd) == -1) {
-                        perror("set_nonblocking");
-                        close(client_fd);
-                        continue;
-                    }
-
-                    if (add_fd_to_epoll(epoll_fd, client_fd) == -1) {//将客户端套接字添加到epoll实例中
-                        perror("add_fd_to_epoll");
-                        close(client_fd);
-                        continue;
-                    }
-                }
-            } else {
-                /* 客户端事件：处理可读，处理错误/关闭 */
-                if (ev & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {//如果事件是错误事件或者连接关闭事件，从epoll实例中删除文件描述符并关闭套接字 
-                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);//从epoll实例中删除文件描述符
-                    close(fd);
-                    continue;
-                }
-
-                if (ev & EPOLLIN) {//如果事件是可读事件，读取数据并回显
-              
-                    while (1) {
-                    char buffer[1024];
-                        ssize_t cnt = recv_request(fd, buffer, sizeof(buffer));//读取数据
-                        if (cnt > 0) {
-                          
-                            int ret = handle_http_request(buffer,fd);
-                            if(ret==-1){//
-                                printf("dup fail;");
-                                epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
-                                close(fd);
-                                break;
-                                } 
-                        } 
-                        else if (cnt == 0) {
-                            /* 对端关闭 */
-                            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
-                            close(fd);
-                            break;
-                        } else {
-                            if (errno == EAGAIN || errno == EWOULDBLOCK) {//如果没有更多数据可读，跳出循环
-                                printf("No more data to read\n");
-                                break;
-                            }
-                            perror("read");
-                            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
-                            close(fd);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+    struct epoll_event ev = {0};
+    ev.events = EPOLLIN;
+    ev.data.u64 = LISTENER_TAG;
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1) {
+        perror("epoll_ctl ADD");
+        return -1;
     }
     return 0;
 }
 
+/// 解析 HTTP 请求，返回请求总长度（包括请求头和请求体），如果请求不完整返回 0，如果请求无效返回 -1
+static ssize_t complete_http_request(const char *buf, size_t len)
+{
+    const char *header_end = NULL;
+
+    for (size_t i = 3; i < len; ++i) {
+        if (memcmp(buf + i - 3, "\r\n\r\n", 4) == 0) {
+            header_end = buf + i + 1;// 指向请求头+请求行结束位置
+            break;
+        }
+    }
+    if (header_end == NULL) {// 请求头未完整接收
+        if (len >= MAX_REQUEST_SIZE) {// 请求头过大，超过最大请求大小
+            return -1;
+        }
+        return 0;
+    }
+
+
+    size_t header_len = (size_t)(header_end - buf);// 请求头长度
+    size_t content_len = 0;// 请求体长度
+    const char *line = buf;
+
+    while (line < header_end) {
+
+        const char *line_end = strstr(line, "\r\n");
+        if (line_end == NULL || line_end >= header_end) {// 处理最后一行或异常情况
+            break;
+        }
+
+        if (strncasecmp(line, "Content-Length:", 15) == 0) {// 找到 Content-Length 头部
+            char *end = NULL;
+            unsigned long value = strtoul(line + 15, &end, 10);// 解析请求体长度
+            if (end == line + 15 || end > line_end || value > MAX_REQUEST_SIZE) {// 无效的 Content-Length
+                return -1;
+            }
+            content_len = (size_t)value;
+        }
+
+        line = line_end + 2;// 移动到下一行
+    }
+
+
+    if (content_len > MAX_REQUEST_SIZE - header_len) {//
+        return -1;
+    }
+    size_t total = header_len + content_len;
+    return len >= total ? (ssize_t)total : 0;
+}
+
+
+static int queue_response(int epoll_fd, Connection *conn, size_t request_len)
+{
+    int rc = build_http_response(conn->request, request_len, conn->fd,
+                                 &conn->response, &conn->response_len);
+    if (rc == HTTP_RESPONSE_CGI_HANDOFF) {
+        /* The CGI child inherited the socket; the Reactor releases its copy. */
+        close_connection(epoll_fd, conn);
+        return 0;
+    }
+    if (rc != HTTP_RESPONSE_READY || conn->response == NULL) {
+        return -1;
+    }
+    if (modify_connection_events(epoll_fd, conn, EPOLLOUT) == -1) {
+        return -1;
+    }
+    return 0;
+}
+
+
+static int read_client(int epoll_fd, Connection *conn)
+{
+    for (;;) {
+        if (conn->request_len == MAX_REQUEST_SIZE) {
+            return -1;
+        }
+        ssize_t n = recv(conn->fd, conn->request + conn->request_len,
+                         MAX_REQUEST_SIZE - conn->request_len, 0);
+        if (n > 0) {
+            conn->request_len += (size_t)n;
+            conn->request[conn->request_len] = '\0';
+            ssize_t request_len = complete_http_request(conn->request, conn->request_len);
+            if (request_len < 0) {
+                return -1;
+            }
+            if (request_len > 0) {
+                return queue_response(epoll_fd, conn, (size_t)request_len);
+            }
+            continue;
+        }
+        if (n == 0) {
+            return -1;
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return 0;
+        }
+        if (errno != EINTR) {
+            perror("recv");
+            return -1;
+        }
+    }
+}
+
+
+
+static int write_client(Connection *conn)
+{
+    while (conn->response_sent < conn->response_len) {
+        ssize_t n = send(conn->fd, conn->response + conn->response_sent,
+                         conn->response_len - conn->response_sent, MSG_NOSIGNAL);
+        if (n > 0) {
+            conn->response_sent += (size_t)n;
+            continue;
+        }
+        if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            return 0;
+        }
+        if (n == -1 && errno == EINTR) {
+            continue;
+        }
+        return -1;
+    }
+    return 1;
+}
+
+
+int epoll_wait_loop(int epoll_fd, int listen_fd)
+{
+    (void)listen_fd;
+    for (;;) {
+        int n = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+        if (n == -1) {
+            if (errno == EINTR) continue;
+            perror("epoll_wait");
+            return -1;
+        }
+        for (int i = 0; i < n; ++i) {
+            if (events[i].data.u64 == LISTENER_TAG) {
+                for (;;) {
+                    int client_fd = accept(listen_fd, NULL, NULL);
+                    if (client_fd == -1) {
+                        if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+                        if (errno != EINTR) perror("accept");
+                        break;
+                    }
+                    if (set_nonblock(client_fd) == -1 || add_connection(epoll_fd, client_fd) == -1) {
+                        perror("add client to epoll");
+                        close(client_fd);
+                    }
+                }
+                continue;
+            }
+
+            Connection *conn = events[i].data.ptr;
+            uint32_t ev = events[i].events;
+            if (ev & (EPOLLERR | EPOLLHUP)) {
+                close_connection(epoll_fd, conn);
+            } else if (ev & EPOLLIN) {
+                if (read_client(epoll_fd, conn) == -1) close_connection(epoll_fd, conn);
+            } else if (ev & EPOLLOUT) {
+                int written = write_client(conn);
+                if (written != 0) close_connection(epoll_fd, conn);
+            } else if (ev & EPOLLRDHUP) {
+                close_connection(epoll_fd, conn);
+            }
+        }
+    }
+}

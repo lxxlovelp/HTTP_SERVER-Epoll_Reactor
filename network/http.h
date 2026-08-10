@@ -1,9 +1,18 @@
 #ifndef HTTP_H
 #define HTTP_H
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/select.h>
-int recv_request(int client_fd, char *buffer, size_t buffer_size);
-void http_route(const char *method, const char *path, const char *body,int fd);
-int handle_http_request(const char *request,int fd);
+
+#include <stddef.h>
+
+/* Return values for build_http_response(). */
+#define HTTP_RESPONSE_READY 0
+#define HTTP_RESPONSE_CGI_HANDOFF 1
+#define HTTP_RESPONSE_ERROR -1
+
+/*
+ * Builds one complete response owned by the caller.  The function never
+ * writes to client_fd; that is deliberately left to the epoll Reactor.
+ */
+int build_http_response(const char *request, size_t request_len, int client_fd,
+                        char **response, size_t *response_len);
+
 #endif

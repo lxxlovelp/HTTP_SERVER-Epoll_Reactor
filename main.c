@@ -9,12 +9,16 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/epoll.h>
+#include <signal.h>
 #include "network/socket.h"
 #include "epoll_server/epoll_server.h"
 
 #define SERVER_PORT 12345
 int main(int argc, char *argv[])
 {
+    /* A peer can close before an EPOLLOUT response is sent. */
+    signal(SIGPIPE, SIG_IGN);
+    signal(SIGCHLD, SIG_IGN);
     uint16_t port = SERVER_PORT;//默认端口号
 
     if (argc > 1) {
