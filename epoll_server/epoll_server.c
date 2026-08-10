@@ -54,7 +54,7 @@ static int add_connection(int epoll_fd, int fd)
 
     struct epoll_event ev = {0};// 初始化 epoll_event 结构体
     ev.events = EPOLLIN | EPOLLRDHUP;
-    ev.data.ptr = conn;
+    ev.data.ptr = conn;// 将 Connection 结构体指针存储在 epoll_event 的 data.ptr 中，以便在事件触发时访问连接状态
     if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1) {
         free(conn);
         return -1;
@@ -74,6 +74,7 @@ int add_fd_to_epoll(int epoll_fd, int fd)
     }
     return 0;
 }
+
 
 /// 解析 HTTP 请求，返回请求总长度（包括请求头和请求体），如果请求不完整返回 0，如果请求无效返回 -1
 static ssize_t complete_http_request(const char *buf, size_t len)
@@ -129,7 +130,7 @@ static ssize_t complete_http_request(const char *buf, size_t len)
 static int queue_response(int epoll_fd, Connection *conn, size_t request_len)
 {
     int rc = build_http_response(conn->request, request_len, conn->fd,
-                                 &conn->response, &conn->response_len);
+                             &conn->response, &conn->response_len);
     if (rc == HTTP_RESPONSE_CGI_HANDOFF) {
         /* The CGI child inherited the socket; the Reactor releases its copy. */
         close_connection(epoll_fd, conn);
@@ -138,7 +139,7 @@ static int queue_response(int epoll_fd, Connection *conn, size_t request_len)
     if (rc != HTTP_RESPONSE_READY || conn->response == NULL) {
         return -1;
     }
-    if (modify_connection_events(epoll_fd, conn, EPOLLOUT) == -1) {
+    if (modify_connection_events(epoll_fd, conn, EPOLLOUT) == -1) {// 修改 epoll 事件为可写
         return -1;
     }
     return 0;
@@ -148,7 +149,7 @@ static int queue_response(int epoll_fd, Connection *conn, size_t request_len)
 static int read_client(int epoll_fd, Connection *conn)
 {
     for (;;) {
-        if (conn->request_len == MAX_REQUEST_SIZE) {
+        if (conn->request_len == MAX_REQUEST_SIZE) {// 请求缓冲区已满，无法继续读取
             return -1;
         }
         ssize_t n = recv(conn->fd, conn->request + conn->request_len,
@@ -168,10 +169,10 @@ static int read_client(int epoll_fd, Connection *conn)
         if (n == 0) {
             return -1;
         }
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {// 非阻塞套接字没有数据可读，等待下一次可读事件
             return 0;
         }
-        if (errno != EINTR) {
+        if (errno != EINTR) {// 如果不是被信号中断，打印错误信息并返回 -1
             perror("recv");
             return -1;
         }
@@ -212,7 +213,7 @@ int epoll_wait_loop(int epoll_fd, int listen_fd)
             return -1;
         }
         for (int i = 0; i < n; ++i) {
-            if (events[i].data.u64 == LISTENER_TAG) {
+            if (events[i].data.u64 == LISTENER_TAG) {// 监听套接字可读，表示有新连接
                 for (;;) {
                     int client_fd = accept(listen_fd, NULL, NULL);
                     if (client_fd == -1) {
@@ -220,7 +221,7 @@ int epoll_wait_loop(int epoll_fd, int listen_fd)
                         if (errno != EINTR) perror("accept");
                         break;
                     }
-                    if (set_nonblock(client_fd) == -1 || add_connection(epoll_fd, client_fd) == -1) {
+                    if (set_nonblock(client_fd) == -1 || add_connection(epoll_fd, client_fd) == -1) {// 添加新连接到 epoll
                         perror("add client to epoll");
                         close(client_fd);
                     }

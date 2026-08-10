@@ -1,198 +1,770 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<title>离谱研究所 🧪</title>
-<style>
-    * {
-        box-sizing: border-box;
-        user-select: none;
-    }
-
-    body {
-        margin: 0;
-        height: 100vh;
-        overflow: hidden;
-        font-family: "Microsoft YaHei", sans-serif;
-        background: linear-gradient(135deg, #ff9a9e, #fad0c4, #a18cd1);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-    }
-
-    .box {
-        width: 420px;
-        padding: 30px;
-        background: rgba(255,255,255,.85);
-        border-radius: 30px;
-        text-align: center;
-        box-shadow: 0 20px 50px rgba(0,0,0,.2);
-        animation: shake 3s infinite;
-    }
-
-    h1 {
-        font-size: 38px;
-        color: #ff4081;
-        animation: jump 1s infinite alternate;
-    }
-
-    p {
-        font-size: 18px;
-    }
-
-    button {
-        border: none;
-        padding: 15px 25px;
-        margin: 10px;
-        border-radius: 50px;
-        cursor: pointer;
-        font-size: 18px;
-        background: #333;
-        color: white;
-        transition: .3s;
-    }
-
-    button:hover {
-        transform: rotate(10deg) scale(1.1);
-        background: #ff4081;
-    }
-
-    #run {
-        position: absolute;
-    }
-
-    #msg {
-        margin-top: 20px;
-        min-height: 30px;
-        color: #673ab7;
-        font-weight: bold;
-    }
-
-    .emoji {
-        position: absolute;
-        font-size: 30px;
-        animation: fall linear infinite;
-    }
-
-    @keyframes jump {
-        from {transform: translateY(0);}
-        to {transform: translateY(-15px);}
-    }
-
-    @keyframes shake {
-        0%,100% {transform: rotate(0);}
-        25% {transform: rotate(1deg);}
-        75% {transform: rotate(-1deg);}
-    }
-
-    @keyframes fall {
-        from {
-            top:-50px;
-            transform:rotate(0deg);
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>嵌入式开发板监控平台</title>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+    <style>
+        /* ===== 全局样式（与之前一致，仅微调颜色） ===== */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #4f6ef7;
+            --primary-dark: #3a56d4;
+            --primary-light: #e8ecff;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --gray-50: #f8fafc;
+            --gray-100: #f1f5f9;
+            --gray-200: #e2e8f0;
+            --gray-300: #cbd5e1;
+            --gray-400: #94a3b8;
+            --gray-500: #64748b;
+            --gray-600: #475569;
+            --gray-700: #334155;
+            --gray-800: #1e293b;
+            --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+            --shadow-md: 0 4px 12px rgba(0,0,0,0.07);
+            --radius: 12px;
+            --radius-sm: 8px;
+            --transition: 0.25s ease;
         }
-        to {
-            top:110vh;
-            transform:rotate(360deg);
+        body { font-family: 'Inter', -apple-system, sans-serif; background: var(--gray-50); color: var(--gray-800); display: flex; min-height: 100vh; }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 10px; }
+
+        /* ===== 侧边栏 (与之前相同) ===== */
+        .sidebar {
+            width: 250px; background: white; border-right: 1px solid var(--gray-200);
+            display: flex; flex-direction: column; padding: 24px 16px;
+            position: fixed; top: 0; left: 0; bottom: 0; z-index: 100;
+            transition: transform var(--transition);
         }
-    }
-</style>
+        .sidebar-brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 28px 8px; border-bottom: 1px solid var(--gray-200); margin-bottom: 24px; }
+        .sidebar-brand .logo-icon { width: 40px; height: 40px; background: var(--primary); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; color: white; font-size: 20px; }
+        .sidebar-brand h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+        .sidebar-brand h1 span { color: var(--primary); }
+        .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+        .sidebar-nav .nav-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--gray-400); padding: 12px 8px 6px 8px; }
+        .sidebar-nav a { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius-sm); color: var(--gray-600); text-decoration: none; font-size: 14px; font-weight: 500; transition: all var(--transition); cursor: pointer; }
+        .sidebar-nav a i { width: 20px; text-align: center; font-size: 16px; }
+        .sidebar-nav a:hover { background: var(--gray-100); color: var(--gray-800); }
+        .sidebar-nav a.active { background: var(--primary-light); color: var(--primary); font-weight: 600; }
+        .sidebar-nav a .badge { margin-left: auto; background: var(--danger); color: white; font-size: 11px; font-weight: 600; padding: 1px 10px; border-radius: 20px; }
+        .sidebar-footer { border-top: 1px solid var(--gray-200); padding-top: 16px; margin-top: 8px; }
+        .sidebar-footer .user-card { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: var(--radius-sm); cursor: pointer; transition: background var(--transition); }
+        .sidebar-footer .user-card:hover { background: var(--gray-100); }
+        .sidebar-footer .user-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--primary-light); color: var(--primary); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; }
+        .sidebar-footer .user-info { flex: 1; }
+        .sidebar-footer .user-info .name { font-size: 14px; font-weight: 600; }
+        .sidebar-footer .user-info .role { font-size: 12px; color: var(--gray-400); }
+
+        /* ===== 主内容 ===== */
+        .main-content { margin-left: 250px; flex: 1; padding: 24px 32px 32px 32px; min-height: 100vh; }
+        .view { display: none; animation: fadeIn 0.3s ease; }
+        .view.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ===== 顶栏 ===== */
+        .topbar { display: flex; align-items: center; justify-content: space-between; padding-bottom: 24px; border-bottom: 1px solid var(--gray-200); margin-bottom: 28px; flex-wrap: wrap; gap: 16px; }
+        .topbar-left { display: flex; align-items: center; gap: 16px; }
+        .topbar-left .menu-toggle { display: none; background: none; border: none; font-size: 22px; color: var(--gray-600); cursor: pointer; padding: 4px; }
+        .topbar-left h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+        .topbar-left h2 small { font-size: 14px; font-weight: 400; color: var(--gray-400); margin-left: 10px; }
+        .topbar-right { display: flex; align-items: center; gap: 20px; }
+        .topbar-right .search-box { display: flex; align-items: center; background: white; border: 1px solid var(--gray-200); border-radius: 50px; padding: 6px 16px 6px 18px; transition: border var(--transition); }
+        .topbar-right .search-box:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,110,247,0.12); }
+        .topbar-right .search-box input { border: none; outline: none; padding: 6px 0; font-size: 14px; background: transparent; width: 180px; color: var(--gray-700); }
+        .topbar-right .search-box input::placeholder { color: var(--gray-400); }
+        .topbar-right .search-box button { background: none; border: none; color: var(--gray-400); cursor: pointer; font-size: 15px; padding-left: 8px; }
+        .topbar-right .icon-btn { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--gray-200); background: white; color: var(--gray-600); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all var(--transition); position: relative; font-size: 16px; }
+        .topbar-right .icon-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+        .topbar-right .icon-btn .dot { position: absolute; top: 8px; right: 8px; width: 8px; height: 8px; background: var(--danger); border-radius: 50%; border: 2px solid white; }
+
+        /* ===== 统计卡片 ===== */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 28px; }
+        .stat-card { background: white; border-radius: var(--radius); padding: 20px 24px; box-shadow: var(--shadow); border: 1px solid var(--gray-200); transition: all var(--transition); cursor: default; }
+        .stat-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+        .stat-card .stat-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .stat-card .stat-top .stat-icon { width: 44px; height: 44px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .stat-card .stat-top .stat-icon.blue { background: #dbeafe; color: #2563eb; }
+        .stat-card .stat-top .stat-icon.green { background: #dcfce7; color: #16a34a; }
+        .stat-card .stat-top .stat-icon.yellow { background: #fef3c7; color: #d97706; }
+        .stat-card .stat-top .stat-icon.red { background: #fee2e2; color: #dc2626; }
+        .stat-card .stat-number { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+        .stat-card .stat-label { font-size: 14px; color: var(--gray-500); font-weight: 500; }
+        .stat-card .stat-change { font-size: 13px; font-weight: 500; margin-top: 6px; display: inline-flex; align-items: center; gap: 4px; }
+        .stat-card .stat-change.up { color: var(--success); }
+        .stat-card .stat-change.down { color: var(--danger); }
+
+        /* ===== 工具栏 ===== */
+        .toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; }
+        .toolbar-left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .toolbar-left .filter-group { display: flex; align-items: center; gap: 8px; background: white; border: 1px solid var(--gray-200); border-radius: var(--radius-sm); padding: 4px 12px; }
+        .toolbar-left .filter-group select { border: none; outline: none; background: transparent; font-size: 13px; padding: 6px 4px; color: var(--gray-700); cursor: pointer; font-weight: 500; }
+        .toolbar-left .filter-group i { color: var(--gray-400); font-size: 13px; }
+        .toolbar-right { display: flex; align-items: center; gap: 10px; }
+        .btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 18px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; border: none; cursor: pointer; transition: all var(--transition); background: white; border: 1px solid var(--gray-200); color: var(--gray-700); }
+        .btn:hover { background: var(--gray-100); }
+        .btn-primary { background: var(--primary); color: white; border-color: var(--primary); }
+        .btn-primary:hover { background: var(--primary-dark); border-color: var(--primary-dark); box-shadow: 0 4px 12px rgba(79,110,247,0.3); }
+        .btn-success { background: var(--success); color: white; border-color: var(--success); }
+        .btn-success:hover { background: #16a34a; border-color: #16a34a; }
+        .btn-outline { background: transparent; border: 1px solid var(--gray-300); }
+
+        /* ===== 表格 ===== */
+        .table-card { background: white; border-radius: var(--radius); border: 1px solid var(--gray-200); box-shadow: var(--shadow); overflow: hidden; }
+        .table-wrapper { overflow-x: auto; padding: 4px 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        table thead { background: var(--gray-50); border-bottom: 1px solid var(--gray-200); }
+        table thead th { padding: 14px 20px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--gray-500); white-space: nowrap; }
+        table tbody tr { border-bottom: 1px solid var(--gray-100); transition: background var(--transition); }
+        table tbody tr:hover { background: var(--gray-50); }
+        table tbody tr:last-child { border-bottom: none; }
+        table tbody td { padding: 14px 20px; vertical-align: middle; }
+
+        .device-info { display: flex; align-items: center; gap: 12px; }
+        .device-info .device-icon { width: 38px; height: 38px; border-radius: var(--radius-sm); background: var(--primary-light); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 18px; }
+        .device-info .device-name { font-weight: 600; }
+        .device-info .device-meta { font-size: 12px; color: var(--gray-400); display: block; }
+
+        .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 14px; border-radius: 50px; font-size: 12px; font-weight: 600; }
+        .status-badge .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+        .status-badge.online { background: #dcfce7; color: #16a34a; }
+        .status-badge.online .dot { background: #16a34a; }
+        .status-badge.offline { background: #fee2e2; color: #dc2626; }
+        .status-badge.offline .dot { background: #dc2626; }
+        .status-badge.warning { background: #fef3c7; color: #d97706; }
+        .status-badge.warning .dot { background: #d97706; }
+        .status-badge.upgrading { background: #dbeafe; color: #2563eb; }
+        .status-badge.upgrading .dot { background: #2563eb; }
+
+        /* 进度条 (用于CPU/内存) */
+        .progress-bar { width: 100%; height: 6px; background: var(--gray-200); border-radius: 20px; overflow: hidden; margin-top: 4px; }
+        .progress-bar .fill { height: 100%; border-radius: 20px; transition: width 0.3s; }
+        .progress-bar .fill.green { background: var(--success); }
+        .progress-bar .fill.yellow { background: var(--warning); }
+        .progress-bar .fill.red { background: var(--danger); }
+
+        .action-btns { display: flex; gap: 6px; }
+        .action-btns button { width: 32px; height: 32px; border-radius: var(--radius-sm); border: 1px solid var(--gray-200); background: white; color: var(--gray-500); cursor: pointer; transition: all var(--transition); display: flex; align-items: center; justify-content: center; font-size: 13px; }
+        .action-btns button:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+        .action-btns button.danger:hover { border-color: var(--danger); color: var(--danger); background: #fee2e2; }
+
+        /* ===== 分页 ===== */
+        .table-footer { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-top: 1px solid var(--gray-200); flex-wrap: wrap; gap: 12px; }
+        .table-footer .info { font-size: 13px; color: var(--gray-500); }
+        .pagination { display: flex; align-items: center; gap: 4px; }
+        .pagination button { width: 34px; height: 34px; border-radius: var(--radius-sm); border: 1px solid var(--gray-200); background: white; color: var(--gray-600); cursor: pointer; font-size: 13px; font-weight: 500; transition: all var(--transition); }
+        .pagination button:hover { border-color: var(--primary); color: var(--primary); }
+        .pagination button.active { background: var(--primary); color: white; border-color: var(--primary); }
+        .pagination button.arrow { background: transparent; border-color: transparent; }
+        .pagination button.arrow:hover { background: var(--gray-100); border-color: var(--gray-200); }
+
+        /* ===== 其他页面样式 ===== */
+        .placeholder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; margin-top: 16px; }
+        .placeholder-card { background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 24px; text-align: center; box-shadow: var(--shadow); transition: all var(--transition); }
+        .placeholder-card:hover { box-shadow: var(--shadow-md); transform: translateY(-4px); }
+        .placeholder-card i { font-size: 40px; color: var(--primary); margin-bottom: 12px; display: block; }
+        .placeholder-card h4 { font-weight: 600; margin-bottom: 6px; }
+        .placeholder-card p { font-size: 13px; color: var(--gray-400); }
+
+        .settings-form { background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 28px 32px; max-width: 640px; box-shadow: var(--shadow); }
+        .settings-form .form-group { margin-bottom: 20px; }
+        .settings-form .form-group label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+        .settings-form .form-group input, .settings-form .form-group select { width: 100%; padding: 10px 14px; border: 1px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 14px; transition: border var(--transition); }
+        .settings-form .form-group input:focus, .settings-form .form-group select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,110,247,0.12); }
+
+        /* ===== 响应式 ===== */
+        @media (max-width: 1024px) { .main-content { padding: 20px; } }
+        @media (max-width: 768px) {
+            .sidebar { transform: translateX(-100%); }
+            .sidebar.open { transform: translateX(0); }
+            .main-content { margin-left: 0; padding: 16px; }
+            .topbar-left .menu-toggle { display: block; }
+            .topbar-left h2 { font-size: 18px; }
+            .topbar-left h2 small { display: none; }
+            .topbar-right .search-box input { width: 120px; }
+            .stats-grid { grid-template-columns: 1fr 1fr; }
+            .toolbar { flex-direction: column; align-items: stretch; }
+            .toolbar-left { flex-wrap: wrap; }
+            .toolbar-right { flex-wrap: wrap; }
+            .table-footer { flex-direction: column; align-items: stretch; text-align: center; }
+            .pagination { justify-content: center; }
+            .settings-form { padding: 20px; }
+        }
+        @media (max-width: 480px) {
+            .stats-grid { grid-template-columns: 1fr; }
+            .topbar-right .search-box { display: none; }
+            .topbar-right .icon-btn.hide-mobile { display: none; }
+        }
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.2); z-index: 99; }
+        .sidebar-overlay.show { display: block; }
+    </style>
 </head>
-
 <body>
 
-<div class="box">
-    <h1>🤪 离谱研究所</h1>
+    <!-- ===== 侧边栏遮罩 ===== -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
-    <p>
-        欢迎进入全宇宙第<br>
-        <b>100% 没有任何意义</b><br>
-        的神秘网站！
-    </p>
+    <!-- ===== 侧边栏 ===== -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="logo-icon"><i class="fas fa-microchip"></i></div>
+            <h1>Dev<span>Monitor</span></h1>
+        </div>
+        <nav class="sidebar-nav">
+            <div class="nav-label">概览</div>
+            <a href="#dashboard" class="active" data-view="dashboard"><i class="fas fa-chart-pie"></i> 仪表盘</a>
+            <a href="#devices" data-view="devices"><i class="fas fa-server"></i> 设备管理</a>
+            <div class="nav-label">运维</div>
+            <a href="#topology" data-view="topology"><i class="fas fa-sitemap"></i> 拓扑视图</a>
+            <a href="#monitor" data-view="monitor"><i class="fas fa-chart-line"></i> 实时监控</a>
+            <a href="#alerts" data-view="alerts"><i class="fas fa-bell"></i> 告警中心 <span class="badge">5</span></a>
+            <div class="nav-label">配置</div>
+            <a href="#settings" data-view="settings"><i class="fas fa-cog"></i> 系统设置</a>
+            <a href="#security" data-view="security"><i class="fas fa-shield-alt"></i> 安全策略</a>
+            <a href="#logs" data-view="logs"><i class="fas fa-history"></i> 操作日志</a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="user-card">
+                <div class="user-avatar">张</div>
+                <div class="user-info">
+                    <div class="name">张明</div>
+                    <div class="role">嵌入式工程师</div>
+                </div>
+                <i class="fas fa-ellipsis-v" style="color: var(--gray-400);"></i>
+            </div>
+        </div>
+    </aside>
 
-    <button onclick="laugh()">点击获得今日智慧</button>
+    <!-- ===== 主内容 ===== -->
+    <main class="main-content">
 
-    <button id="run" 
-        onmouseover="escapeButton()">
-        不要点我
-    </button>
+        <!-- ===== 顶栏 ===== -->
+        <header class="topbar">
+            <div class="topbar-left">
+                <button class="menu-toggle" id="menuToggle"><i class="fas fa-bars"></i></button>
+                <h2 id="pageTitle">仪表盘 <small id="pageSubtitle">开发板集群实时状态</small></h2>
+            </div>
+            <div class="topbar-right">
+                <div class="search-box">
+                    <input type="text" placeholder="搜索设备..." />
+                    <button><i class="fas fa-search"></i></button>
+                </div>
+                <button class="icon-btn"><i class="fas fa-bell"></i><span class="dot"></span></button>
+                <button class="icon-btn hide-mobile"><i class="fas fa-question-circle"></i></button>
+            </div>
+        </header>
 
-    <div id="msg"></div>
-</div>
+        <!-- ============================================================ -->
+        <!-- 视图1: 仪表盘 (Dashboard) -->
+        <!-- ============================================================ -->
+        <section id="view-dashboard" class="view active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-top">
+                        <span class="stat-label">总设备</span>
+                        <span class="stat-icon blue"><i class="fas fa-microchip"></i></span>
+                    </div>
+                    <div class="stat-number">247</div>
+                    <div class="stat-change up"><i class="fas fa-arrow-up"></i> +8.3%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-top">
+                        <span class="stat-label">在线</span>
+                        <span class="stat-icon green"><i class="fas fa-wifi"></i></span>
+                    </div>
+                    <div class="stat-number">198</div>
+                    <div class="stat-change up"><i class="fas fa-arrow-up"></i> +5.1%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-top">
+                        <span class="stat-label">平均 CPU</span>
+                        <span class="stat-icon yellow"><i class="fas fa-microchip"></i></span>
+                    </div>
+                    <div class="stat-number">34%</div>
+                    <div class="stat-change down"><i class="fas fa-arrow-down"></i> -2.4%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-top">
+                        <span class="stat-label">告警</span>
+                        <span class="stat-icon red"><i class="fas fa-exclamation-triangle"></i></span>
+                    </div>
+                    <div class="stat-number">12</div>
+                    <div class="stat-change down"><i class="fas fa-arrow-up"></i> +3.7%</div>
+                </div>
+            </div>
 
+            <!-- 设备列表 -->
+            <div class="toolbar">
+                <div class="toolbar-left">
+                    <div class="filter-group">
+                        <i class="fas fa-filter"></i>
+                        <select>
+                            <option>所有状态</option>
+                            <option>在线</option>
+                            <option>离线</option>
+                            <option>告警</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <i class="fas fa-tag"></i>
+                        <select>
+                            <option>所有型号</option>
+                            <option>Raspberry Pi 4</option>
+                            <option>ESP32</option>
+                            <option>Jetson Nano</option>
+                            <option>Arduino Due</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-outline"><i class="fas fa-sync-alt"></i> 刷新</button>
+                </div>
+                <div class="toolbar-right">
+                    <button class="btn btn-success"><i class="fas fa-plus"></i> 添加设备</button>
+                    <button class="btn btn-outline"><i class="fas fa-download"></i> 导出</button>
+                </div>
+            </div>
 
-<script>
+            <div class="table-card">
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>设备</th>
+                                <th>IP 地址</th>
+                                <th>CPU 使用率</th>
+                                <th>内存使用率</th>
+                                <th>温度</th>
+                                <th>运行时间</th>
+                                <th>状态</th>
+                                <th style="text-align: center;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <div class="device-info">
+                                        <div class="device-icon"><i class="fas fa-microchip"></i></div>
+                                        <div>
+                                            <div class="device-name">Edge-Node-01</div>
+                                            <span class="device-meta">Raspberry Pi 4</span>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><code style="background:var(--gray-100);padding:2px 10px;border-radius:4px;">192.168.1.101</code></td>
+                                <td>
+                                    <span>32%</span>
+                                    <div class="progress-bar"><div class="fill green" style="width:32%"></div></div>
+                                </td>
+                                <td>
+                                    <span>47%</span>
+                                    <div class="progress-bar"><div class="fill green" style="width:47%"></div></div>
+                                </td>
+                                <td>42°C</td>
+                                <td>12d 3h</td>
+                                <td><span class="status-badge online"><span class="dot"></span>在线</span></td>
+                                <td style="text-align: center;">
+                                    <div class="action-btns" style="justify-content: center;">
+                                        <button title="详情"><i class="fas fa-eye"></i></button>
+                                        <button title="重启" class="danger"><i class="fas fa-power-off"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="device-info">
+                                        <div class="device-icon"><i class="fas fa-microchip"></i></div>
+                                        <div>
+                                            <div class="device-name">Sensor-Hub-05</div>
+                                            <span class="device-meta">ESP32</span>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><code style="background:var(--gray-100);padding:2px 10px;border-radius:4px;">192.168.1.205</code></td>
+                                <td>
+                                    <span>78%</span>
+                                    <div class="progress-bar"><div class="fill red" style="width:78%"></div></div>
+                                </td>
+                                <td>
+                                    <span>61%</span>
+                                    <div class="progress-bar"><div class="fill yellow" style="width:61%"></div></div>
+                                </td>
+                                <td>65°C</td>
+                                <td>3d 7h</td>
+                                <td><span class="status-badge warning"><span class="dot"></span>告警</span></td>
+                                <td style="text-align: center;">
+                                    <div class="action-btns" style="justify-content: center;">
+                                        <button title="详情"><i class="fas fa-eye"></i></button>
+                                        <button title="重启" class="danger"><i class="fas fa-power-off"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="device-info">
+                                        <div class="device-icon"><i class="fas fa-microchip"></i></div>
+                                        <div>
+                                            <div class="device-name">AI-Edge-03</div>
+                                            <span class="device-meta">Jetson Nano</span>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><code style="background:var(--gray-100);padding:2px 10px;border-radius:4px;">192.168.1.152</code></td>
+                                <td>
+                                    <span>19%</span>
+                                    <div class="progress-bar"><div class="fill green" style="width:19%"></div></div>
+                                </td>
+                                <td>
+                                    <span>33%</span>
+                                    <div class="progress-bar"><div class="fill green" style="width:33%"></div></div>
+                                </td>
+                                <td>38°C</td>
+                                <td>28d 5h</td>
+                                <td><span class="status-badge online"><span class="dot"></span>在线</span></td>
+                                <td style="text-align: center;">
+                                    <div class="action-btns" style="justify-content: center;">
+                                        <button title="详情"><i class="fas fa-eye"></i></button>
+                                        <button title="重启" class="danger"><i class="fas fa-power-off"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="device-info">
+                                        <div class="device-icon"><i class="fas fa-microchip"></i></div>
+                                        <div>
+                                            <div class="device-name">Gateway-02</div>
+                                            <span class="device-meta">Raspberry Pi 3</span>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><code style="background:var(--gray-100);padding:2px 10px;border-radius:4px;">192.168.1.110</code></td>
+                                <td>
+                                    <span>55%</span>
+                                    <div class="progress-bar"><div class="fill yellow" style="width:55%"></div></div>
+                                </td>
+                                <td>
+                                    <span>72%</span>
+                                    <div class="progress-bar"><div class="fill yellow" style="width:72%"></div></div>
+                                </td>
+                                <td>51°C</td>
+                                <td>9d 2h</td>
+                                <td><span class="status-badge online"><span class="dot"></span>在线</span></td>
+                                <td style="text-align: center;">
+                                    <div class="action-btns" style="justify-content: center;">
+                                        <button title="详情"><i class="fas fa-eye"></i></button>
+                                        <button title="重启" class="danger"><i class="fas fa-power-off"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="device-info">
+                                        <div class="device-icon"><i class="fas fa-microchip"></i></div>
+                                        <div>
+                                            <div class="device-name">Remote-Node-09</div>
+                                            <span class="device-meta">Arduino Due</span>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><code style="background:var(--gray-100);padding:2px 10px;border-radius:4px;">192.168.2.45</code></td>
+                                <td>
+                                    <span>12%</span>
+                                    <div class="progress-bar"><div class="fill green" style="width:12%"></div></div>
+                                </td>
+                                <td>
+                                    <span>18%</span>
+                                    <div class="progress-bar"><div class="fill green" style="width:18%"></div></div>
+                                </td>
+                                <td>29°C</td>
+                                <td>1d 18h</td>
+                                <td><span class="status-badge offline"><span class="dot"></span>离线</span></td>
+                                <td style="text-align: center;">
+                                    <div class="action-btns" style="justify-content: center;">
+                                        <button title="详情"><i class="fas fa-eye"></i></button>
+                                        <button title="重启" class="danger"><i class="fas fa-power-off"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-footer">
+                    <span class="info">显示 1-5 / 共 247 台设备</span>
+                    <div class="pagination">
+                        <button class="arrow"><i class="fas fa-chevron-left"></i></button>
+                        <button class="active">1</button>
+                        <button>2</button>
+                        <button>3</button>
+                        <button>…</button>
+                        <button>50</button>
+                        <button class="arrow"><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-const jokes = [
-    "你的电脑没有坏，它只是累了，想退休。",
-    "科学证明：摸鱼超过5分钟，会变成摸鱼大师。",
-    "恭喜你发现了一个按钮，但按钮也发现了你。",
-    "今天的幸运数字是：不存在。",
-    "你的智商余额不足，请充值快乐。",
-    "系统检测：你帅/美得不符合常理。",
-    "警告：你正在浪费时间，但浪费得很开心。"
-];
+        <!-- ============================================================ -->
+        <!-- 视图2: 设备管理 (Devices) -->
+        <!-- ============================================================ -->
+        <section id="view-devices" class="view">
+            <div class="toolbar">
+                <div class="toolbar-left">
+                    <button class="btn btn-success"><i class="fas fa-plus"></i> 批量注册</button>
+                    <button class="btn btn-outline"><i class="fas fa-sync-alt"></i> 同步</button>
+                </div>
+                <div class="toolbar-right">
+                    <button class="btn btn-outline"><i class="fas fa-print"></i> 打印清单</button>
+                </div>
+            </div>
+            <div class="table-card">
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>设备名称</th>
+                                <th>IP 地址</th>
+                                <th>型号</th>
+                                <th>固件版本</th>
+                                <th>所属分组</th>
+                                <th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Edge-Node-01</td><td>192.168.1.101</td><td>Raspberry Pi 4</td><td>v2.0.3</td><td>边缘计算</td><td><span class="status-badge online"><span class="dot"></span>在线</span></td></tr>
+                            <tr><td>Sensor-Hub-05</td><td>192.168.1.205</td><td>ESP32</td><td>v1.3.1</td><td>传感器网络</td><td><span class="status-badge warning"><span class="dot"></span>告警</span></td></tr>
+                            <tr><td>AI-Edge-03</td><td>192.168.1.152</td><td>Jetson Nano</td><td>v3.0.1</td><td>AI 推理</td><td><span class="status-badge online"><span class="dot"></span>在线</span></td></tr>
+                            <tr><td>Gateway-02</td><td>192.168.1.110</td><td>Raspberry Pi 3</td><td>v2.1.0</td><td>网关</td><td><span class="status-badge online"><span class="dot"></span>在线</span></td></tr>
+                            <tr><td>Remote-Node-09</td><td>192.168.2.45</td><td>Arduino Due</td><td>v1.0.2</td><td>远程采集</td><td><span class="status-badge offline"><span class="dot"></span>离线</span></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-footer">
+                    <span class="info">共 5 台设备</span>
+                    <div class="pagination">
+                        <button class="arrow"><i class="fas fa-chevron-left"></i></button>
+                        <button class="active">1</button>
+                        <button>2</button>
+                        <button class="arrow"><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                </div>
+            </div>
+        </section>
 
+        <!-- ============================================================ -->
+        <!-- 视图3: 拓扑视图 (Topology) -->
+        <!-- ============================================================ -->
+        <section id="view-topology" class="view">
+            <div style="background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 40px 20px; text-align: center; box-shadow: var(--shadow);">
+                <i class="fas fa-sitemap" style="font-size: 64px; color: var(--primary); margin-bottom: 20px; display: block;"></i>
+                <h3 style="font-weight: 600; margin-bottom: 8px;">设备拓扑图</h3>
+                <p style="color: var(--gray-400); max-width: 480px; margin: 0 auto 24px;">展示网关、边缘节点、传感器之间的层级关系，支持拖拽查看。</p>
+                <div class="placeholder-grid">
+                    <div class="placeholder-card"><i class="fas fa-server" style="color: var(--primary);"></i><h4>网关层 (3)</h4><p>Gateway-01, 02, 03</p></div>
+                    <div class="placeholder-card"><i class="fas fa-microchip" style="color: var(--success);"></i><h4>边缘节点 (28)</h4><p>Edge-Node-01 ~ 28</p></div>
+                    <div class="placeholder-card"><i class="fas fa-bolt" style="color: var(--warning);"></i><h4>传感器 (136)</h4><p>Sensor-Hub-01 ~ 136</p></div>
+                </div>
+                <button class="btn btn-primary"><i class="fas fa-expand"></i> 加载完整拓扑</button>
+            </div>
+        </section>
 
-function laugh(){
-    let msg = document.getElementById("msg");
-    msg.innerHTML = jokes[Math.floor(Math.random()*jokes.length)];
-    
-    document.body.style.transform =
-        "rotate("+(Math.random()*4-2)+"deg)";
-}
+        <!-- ============================================================ -->
+        <!-- 视图4: 实时监控 (Monitor) - 复用拓扑占位 -->
+        <!-- ============================================================ -->
+        <section id="view-monitor" class="view">
+            <div style="background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 40px 20px; text-align: center; box-shadow: var(--shadow);">
+                <i class="fas fa-chart-line" style="font-size: 64px; color: var(--primary); margin-bottom: 20px; display: block;"></i>
+                <h3 style="font-weight: 600; margin-bottom: 8px;">实时性能监控</h3>
+                <p style="color: var(--gray-400); max-width: 480px; margin: 0 auto 24px;">展示 CPU、内存、网络流量的实时曲线，可自定义时间窗口。</p>
+                <div class="placeholder-grid">
+                    <div class="placeholder-card"><i class="fas fa-chart-bar"></i><h4>CPU 平均负载</h4><p>当前 34%</p></div>
+                    <div class="placeholder-card"><i class="fas fa-memory"></i><h4>内存使用</h4><p>平均 52%</p></div>
+                    <div class="placeholder-card"><i class="fas fa-thermometer-half"></i><h4>温度分布</h4><p>最高 68°C</p></div>
+                </div>
+                <button class="btn btn-primary"><i class="fas fa-play"></i> 开启实时监控</button>
+            </div>
+        </section>
 
+        <!-- ============================================================ -->
+        <!-- 视图5: 告警中心 (Alerts) - 复用占位 -->
+        <!-- ============================================================ -->
+        <section id="view-alerts" class="view">
+            <div style="background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 40px 20px; text-align: center; box-shadow: var(--shadow);">
+                <i class="fas fa-bell" style="font-size: 64px; color: var(--danger); margin-bottom: 20px; display: block;"></i>
+                <h3 style="font-weight: 600; margin-bottom: 8px;">告警中心</h3>
+                <p style="color: var(--gray-400); max-width: 480px; margin: 0 auto 24px;">当前有 5 条未处理告警，包括 CPU 过载、温度过高、离线等。</p>
+                <div class="placeholder-grid">
+                    <div class="placeholder-card" style="border-left: 4px solid var(--danger);"><i class="fas fa-exclamation-circle" style="color: var(--danger);"></i><h4>CPU 过载</h4><p>Sensor-Hub-05 (78%)</p></div>
+                    <div class="placeholder-card" style="border-left: 4px solid var(--warning);"><i class="fas fa-thermometer-full" style="color: var(--warning);"></i><h4>温度过高</h4><p>Edge-Node-12 (72°C)</p></div>
+                    <div class="placeholder-card" style="border-left: 4px solid var(--gray-400);"><i class="fas fa-plug" style="color: var(--gray-500);"></i><h4>离线</h4><p>Remote-Node-09</p></div>
+                </div>
+                <button class="btn btn-danger"><i class="fas fa-check"></i> 标记全部已读</button>
+            </div>
+        </section>
 
-// 逃跑按钮
-function escapeButton(){
-    let btn=document.getElementById("run");
+        <!-- ============================================================ -->
+        <!-- 视图6: 系统设置 (Settings) -->
+        <!-- ============================================================ -->
+        <section id="view-settings" class="view">
+            <div class="settings-form">
+                <h3 style="margin-bottom: 24px; font-weight: 700;"><i class="fas fa-cog" style="color: var(--primary); margin-right: 10px;"></i>平台设置</h3>
+                <div class="form-group">
+                    <label>系统名称</label>
+                    <input type="text" value="DevMonitor 监控平台" />
+                </div>
+                <div class="form-group">
+                    <label>数据刷新间隔 (秒)</label>
+                    <input type="number" value="10" />
+                </div>
+                <div class="form-group">
+                    <label>默认视图</label>
+                    <select><option>仪表盘</option><option>设备管理</option><option>实时监控</option></select>
+                </div>
+                <div class="form-group">
+                    <label>告警阈值 (CPU %)</label>
+                    <input type="number" value="80" />
+                </div>
+                <button class="btn btn-primary" style="width: 100%; justify-content: center;"><i class="fas fa-save"></i> 保存设置</button>
+            </div>
+        </section>
 
-    btn.style.left=Math.random()*80+"vw";
-    btn.style.top=Math.random()*80+"vh";
-}
+        <!-- 视图7: 安全策略 (Security) - 复用设置布局 -->
+        <section id="view-security" class="view">
+            <div class="settings-form">
+                <h3 style="margin-bottom: 24px; font-weight: 700;"><i class="fas fa-shield-alt" style="color: var(--primary); margin-right: 10px;"></i>安全策略</h3>
+                <div class="form-group">
+                    <label>SSH 端口</label>
+                    <input type="number" value="2222" />
+                </div>
+                <div class="form-group">
+                    <label>允许 IP 白名单</label>
+                    <input type="text" value="192.168.1.0/24, 10.0.0.0/8" />
+                </div>
+                <div class="form-group">
+                    <label>登录尝试次数限制</label>
+                    <input type="number" value="5" />
+                </div>
+                <button class="btn btn-primary" style="width: 100%; justify-content: center;"><i class="fas fa-save"></i> 应用策略</button>
+            </div>
+        </section>
 
+        <!-- 视图8: 操作日志 (Logs) - 复用占位 -->
+        <section id="view-logs" class="view">
+            <div style="background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 40px 20px; text-align: center; box-shadow: var(--shadow);">
+                <i class="fas fa-history" style="font-size: 64px; color: var(--gray-500); margin-bottom: 20px; display: block;"></i>
+                <h3 style="font-weight: 600; margin-bottom: 8px;">操作日志</h3>
+                <p style="color: var(--gray-400); max-width: 480px; margin: 0 auto 24px;">记录所有设备操作、配置变更、登录事件等，支持按时间筛选。</p>
+                <div style="text-align: left; max-width: 600px; margin: 0 auto;">
+                    <div style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><i class="fas fa-check-circle" style="color: var(--success);"></i> 2026-08-10 14:23 - 用户 admin 重启了 Edge-Node-01</div>
+                    <div style="padding: 12px; border-bottom: 1px solid var(--gray-200);"><i class="fas fa-edit" style="color: var(--primary);"></i> 2026-08-10 13:15 - 用户 张明 修改了 Sensor-Hub-05 的阈值</div>
+                    <div style="padding: 12px;"><i class="fas fa-exclamation-circle" style="color: var(--warning);"></i> 2026-08-10 11:02 - 系统检测到 Remote-Node-09 离线</div>
+                </div>
+                <button class="btn btn-outline" style="margin-top: 20px;"><i class="fas fa-download"></i> 导出日志</button>
+            </div>
+        </section>
 
-// 飘落表情
-function createEmoji(){
+        <!-- 底部版权 -->
+        <div style="margin-top: 28px; text-align: center; font-size: 13px; color: var(--gray-400); border-top: 1px solid var(--gray-200); padding-top: 20px;">
+            &copy; 2026 DevMonitor · 嵌入式开发板监控平台 v2.0
+        </div>
 
-    let e=document.createElement("div");
+    </main>
 
-    let list=["😂","🤣","🍉","🐸","🤡","💩","✨","🚀"];
+    <!-- ===== JavaScript (路由逻辑与之前相同) ===== -->
+    <script>
+        (function() {
+            // 侧边栏切换
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            const menuToggle = document.getElementById('menuToggle');
+            function openSidebar() { sidebar.classList.add('open'); overlay.classList.add('show'); document.body.style.overflow = 'hidden'; }
+            function closeSidebar() { sidebar.classList.remove('open'); overlay.classList.remove('show'); document.body.style.overflow = ''; }
+            menuToggle.addEventListener('click', (e) => { e.stopPropagation(); sidebar.classList.contains('open') ? closeSidebar() : openSidebar(); });
+            overlay.addEventListener('click', closeSidebar);
+            document.addEventListener('click', (e) => {
+                if (!sidebar.contains(e.target) && !menuToggle.contains(e.target) && window.innerWidth <= 768) closeSidebar();
+            });
+            window.addEventListener('resize', () => { if (window.innerWidth > 768 && sidebar.classList.contains('open')) closeSidebar(); });
 
-    e.innerHTML=list[Math.floor(Math.random()*list.length)];
+            // 路由表
+            const views = {
+                dashboard: { element: document.getElementById('view-dashboard'), title: '仪表盘', sub: '开发板集群实时状态' },
+                devices: { element: document.getElementById('view-devices'), title: '设备管理', sub: '所有嵌入式设备清单' },
+                topology: { element: document.getElementById('view-topology'), title: '拓扑视图', sub: '设备层级关系' },
+                monitor: { element: document.getElementById('view-monitor'), title: '实时监控', sub: '性能数据曲线' },
+                alerts: { element: document.getElementById('view-alerts'), title: '告警中心', sub: '当前告警事件' },
+                settings: { element: document.getElementById('view-settings'), title: '系统设置', sub: '平台参数配置' },
+                security: { element: document.getElementById('view-security'), title: '安全策略', sub: '访问控制与安全' },
+                logs: { element: document.getElementById('view-logs'), title: '操作日志', sub: '审计记录' }
+            };
 
-    e.className="emoji";
+            const navLinks = document.querySelectorAll('.sidebar-nav a[data-view]');
+            const pageTitle = document.getElementById('pageTitle');
+            const pageSubtitle = document.getElementById('pageSubtitle');
 
-    e.style.left=Math.random()*100+"vw";
+            function navigateTo(viewId) {
+                document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+                const viewData = views[viewId];
+                if (viewData && viewData.element) {
+                    viewData.element.classList.add('active');
+                    pageTitle.textContent = viewData.title;
+                    pageSubtitle.textContent = viewData.sub;
+                } else {
+                    views.dashboard.element.classList.add('active');
+                    pageTitle.textContent = views.dashboard.title;
+                    pageSubtitle.textContent = views.dashboard.sub;
+                }
+                navLinks.forEach(link => {
+                    link.classList.remove('active');
+                    if (link.dataset.view === viewId) link.classList.add('active');
+                });
+                if (window.innerWidth <= 768) closeSidebar();
+                if (window.location.hash !== '#' + viewId) history.pushState(null, '', '#' + viewId);
+            }
 
-    e.style.animationDuration=
-        (3+Math.random()*5)+"s";
+            navLinks.forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const viewId = link.dataset.view;
+                    if (viewId) navigateTo(viewId);
+                });
+            });
 
-    document.body.appendChild(e);
+            window.addEventListener('hashchange', () => {
+                const hash = window.location.hash.replace('#', '');
+                if (hash && views[hash]) navigateTo(hash);
+                else navigateTo('dashboard');
+            });
 
-    setTimeout(()=>{
-        e.remove();
-    },8000);
-}
+            // 初始化
+            const initHash = window.location.hash.replace('#', '');
+            if (initHash && views[initHash]) navigateTo(initHash);
+            else navigateTo('dashboard');
 
+            // 其他交互反馈
+            document.querySelectorAll('.action-btns button, .pagination button:not(.arrow), .btn, .icon-btn, .stat-card')
+                .forEach(el => {
+                    el.addEventListener('click', function(e) {
+                        if (this.closest('.action-btns') || this.closest('.pagination') || this.classList
+                            .contains('btn') || this.classList.contains('icon-btn')) {
+                            this.style.transition = 'transform 0.1s';
+                            this.style.transform = 'scale(0.92)';
+                            setTimeout(() => { this.style.transform = ''; }, 150);
+                        }
+                    });
+                });
 
-setInterval(createEmoji,500);
+            // 搜索框
+            document.querySelector('.search-box input')?.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') alert('🔍 搜索: "' + this.value + '"');
+            });
 
-
-// 随机标题
-setInterval(()=>{
-    let titles=[
-        "离谱研究所 🧪",
-        "宇宙摸鱼中心 🐟",
-        "人类迷惑行为观察站 👀",
-        "快乐病毒实验室 🦠"
-    ];
-
-    document.title=
-        titles[Math.floor(Math.random()*titles.length)];
-
-},2000);
-
-</script>
+            console.log('✅ DevMonitor 已启动 (嵌入式开发板监控)');
+        })();
+    </script>
 
 </body>
 </html>
