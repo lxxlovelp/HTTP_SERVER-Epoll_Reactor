@@ -9,9 +9,10 @@
 #include "../network/http.h"
 #include "../network/socket.h"
 #include "epoll_server.h"
+#include "Thread_pool.h"
+
 
 #define LISTENER_TAG UINT64_C(1)
-
 
 typedef struct {
     int fd;
@@ -102,7 +103,7 @@ static ssize_t complete_http_request(const char *buf, size_t len)
     while (line < header_end) {
 
         const char *line_end = strstr(line, "\r\n");
-        if (line_end == NULL || line_end >= header_end) {// 处理最后一行或异常情况
+        if (line_end == NULL || line_end >= header_end) {// 处理最请求行异常情况
             break;
         }
 
@@ -119,11 +120,11 @@ static ssize_t complete_http_request(const char *buf, size_t len)
     }
 
 
-    if (content_len > MAX_REQUEST_SIZE - header_len) {//
+    if (content_len > MAX_REQUEST_SIZE - header_len) {
         return -1;
     }
     size_t total = header_len + content_len;
-    return len >= total ? (ssize_t)total : 0;
+    return len >= total ? (ssize_t)total : 0;// 返回请求总长度，如果请求不完整返回 0
 }
 
 
@@ -153,7 +154,7 @@ static int read_client(int epoll_fd, Connection *conn)
             return -1;
         }
         ssize_t n = recv(conn->fd, conn->request + conn->request_len,
-                         MAX_REQUEST_SIZE - conn->request_len, 0);
+                         MAX_REQUEST_SIZE - conn->request_len, 0);// 从客户端套接字读取数据到请求缓冲区
         if (n > 0) {
             conn->request_len += (size_t)n;
             conn->request[conn->request_len] = '\0';
@@ -190,10 +191,10 @@ static int write_client(Connection *conn)
             conn->response_sent += (size_t)n;
             continue;
         }
-        if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {// 非阻塞套接字无法立即发送数据，等待下一次可写事件
             return 0;
         }
-        if (n == -1 && errno == EINTR) {
+        if (n == -1 && errno == EINTR) {// 被信号中断，继续发送
             continue;
         }
         return -1;
@@ -202,8 +203,9 @@ static int write_client(Connection *conn)
 }
 
 
-int epoll_wait_loop(int epoll_fd, int listen_fd)
-{
+int epoll_wait_loop(int epoll_fd, int listen_fd,ThreadPool* pool)
+{   
+   
     (void)listen_fd;
     for (;;) {
         int n = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
@@ -217,7 +219,7 @@ int epoll_wait_loop(int epoll_fd, int listen_fd)
                 for (;;) {
                     int client_fd = accept(listen_fd, NULL, NULL);
                     if (client_fd == -1) {
-                        if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+                        if (errno == EAGAIN || errno == EWOULDBLOCK) break;// 没有更多连接可接受，退出循环
                         if (errno != EINTR) perror("accept");
                         break;
                     }
@@ -229,17 +231,18 @@ int epoll_wait_loop(int epoll_fd, int listen_fd)
                 continue;
             }
 
-            Connection *conn = events[i].data.ptr;
+            Connection *newconn = events[i].data.ptr;
+
             uint32_t ev = events[i].events;
             if (ev & (EPOLLERR | EPOLLHUP)) {
-                close_connection(epoll_fd, conn);
+                close_connection(epoll_fd, newconn);
             } else if (ev & EPOLLIN) {
-                if (read_client(epoll_fd, conn) == -1) close_connection(epoll_fd, conn);
+                if (read_client(epoll_fd, newconn) == -1) close_connection(epoll_fd, newconn);
             } else if (ev & EPOLLOUT) {
-                int written = write_client(conn);
-                if (written != 0) close_connection(epoll_fd, conn);
+                int written = write_client(newconn);
+                if (written != 0) close_connection(epoll_fd, newconn);
             } else if (ev & EPOLLRDHUP) {
-                close_connection(epoll_fd, conn);
+                close_connection(epoll_fd, newconn);
             }
         }
     }
