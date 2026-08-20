@@ -1,4 +1,0 @@
-#ifndef Static_H
-#define Static_H
-void handle_static(int client_fd, const char *path);
-#endif

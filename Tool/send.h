@@ -13,7 +13,7 @@ typedef struct {
 struct msgbuf {
     long type;
     SensorData text;  // 改为单个变量，而不是数组
-};
+};// 结构体定义，包含消息类型和传感器数据
 
 extern struct  msgbuf msg2;
 

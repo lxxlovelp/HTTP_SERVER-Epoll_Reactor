@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <stdio.h>
+
 /*################################################################3
 Create multiple worker threads in advance
 → the main thread keeps adding tasks to the task queue
@@ -130,7 +131,7 @@ int threadpool_destroy(ThreadPool *pool) {
 
     free(pool->threads);
 
-    Task *cur = pool->queue_head;//
+    Task *cur = pool->queue_head;
     while (cur) {
         Task *next = cur->next;
         free(cur);

@@ -60,7 +60,7 @@ int init_listen_server(uint16_t port)
 
     self.sin_port = htons(port);//
 
-    self.sin_addr.s_addr =htonl(INADDR_ANY);
+    self.sin_addr.s_addr =htonl(INADDR_ANY);//将IP地址设置为INADDR_ANY，表示服务器可以接受任意IP地址的连接请求
 
 
     int ret = bind(tcp_socket, (struct sockaddr*)&self, sizeof(self));//绑定套接字到指定的IP地址和端口号
@@ -72,7 +72,6 @@ int init_listen_server(uint16_t port)
         close(tcp_socket);
         return -1;
     }
-
 
 
     ret =listen(tcp_socket,128);//监听套接字，等待客户端连接请求，第二个参数表示最大连接数

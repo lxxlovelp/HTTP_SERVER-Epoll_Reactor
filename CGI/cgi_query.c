@@ -24,8 +24,8 @@ typedef struct {
 
 // P操作：挂起等待
 void P(int semid, int num) {
-  struct sembuf op = {num, -1, 0};
-  semop(semid, &op, 1);
+  struct sembuf op = {num, -1, 0};// P操作，等待信号量减1，如果信号量为0则阻塞
+  semop(semid, &op, 1);// 执行信号量操作
 }
 
 int main(int argc, char *argv[]) {
@@ -45,7 +45,11 @@ int main(int argc, char *argv[]) {
 
   // 2. 使用专属 key 创建属于我自己的共享内存
   int shmid = shmget(my_key, SHM_SIZE, IPC_CREAT | 0666);
-  char *addr = shmat(shmid, NULL, 0);
+  char *addr = shmat(shmid, NULL, 0);// 将共享内存挂载到当前进程的地址空间
+  if (addr == (char *)-1) { 
+      perror("shmat");
+      return 1;
+  }
 
   // 3. 使用专属 key 创建属于我自己的信号量 (只需要1个即可，专用于 B 唤醒 A)
   int semid = semget(my_key, 1, IPC_CREAT | 0666);// 1 代表信号集只有一个信号

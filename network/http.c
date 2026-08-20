@@ -61,7 +61,7 @@ static int make_response(int status,
 
 static int static_response(const char *path, char **response, size_t *response_len)
 {
-    if (strstr(path, "..") != NULL) {
+    if (strstr(path, "..") != NULL) {// 防止目录遍历攻击
         return make_response(
             403,
             "Forbidden",
@@ -73,7 +73,7 @@ static int static_response(const char *path, char **response, size_t *response_l
     }
 
     const char *name = path + strlen("/static/");
-    if ((*name == '\0') || (strchr(name, '?') != NULL)) {
+    if ((*name == '\0') || (strchr(name, '?') != NULL)) {// 如果请求的路径是 /static/ 或包含查询参数，返回 404
         return make_response(
             404,
             "Not Found",
@@ -102,6 +102,7 @@ static int static_response(const char *path, char **response, size_t *response_l
             response_len);
     }
 
+    //声明一个 st 变量，用来保存文件的信息：类型、大小、权限等
     struct stat st;
     if ((fstat(fd, &st) == -1) || (!S_ISREG(st.st_mode)) || (st.st_size > 4 * 1024 * 1024)) {
         close(fd);
@@ -116,12 +117,12 @@ static int static_response(const char *path, char **response, size_t *response_l
     }
 
     size_t size = (size_t)st.st_size;
-    char *body = malloc((size == 0) ? 1 : size);
+    char *body = malloc((size == 0) ? 1 : size);// 如果文件大小为 0，仍然分配 1 字节以避免 malloc(0) 的未定义行为
     if (body == NULL) {
         close(fd);
         return -1;
     }
-
+    //把文件 fd 的全部内容读到 body 内存中；如果读失败，就释放内存并返回错误
     size_t got = 0;
     while (got < size) {
         ssize_t n = read(fd, body + got, size - got);
@@ -130,7 +131,7 @@ static int static_response(const char *path, char **response, size_t *response_l
             continue;
         }
 
-        if ((n == -1) && (errno == EINTR)) {
+        if ((n == -1) && (errno == EINTR)) {// 如果被信号中断，继续读取
             continue;
         }
 
@@ -164,12 +165,12 @@ int build_http_response(const char *request,
                         char **response,
                         size_t *response_len)
 {
-    (void)request_len;
+    (void)request_len;//
 
     *response = NULL;
     *response_len = 0;
 
-    char *copy = strdup(request);
+    char *copy = strdup(request);// 复制请求字符串，以便使用 strtok 分割
     if (copy == NULL) {
         return HTTP_RESPONSE_ERROR;
     }
@@ -177,12 +178,12 @@ int build_http_response(const char *request,
     char *line_end = strstr(copy, "\r\n");
     if (line_end == NULL) {
         free(copy);
-        return HTTP_RESPONSE_ERROR;
+        return HTTP_RESPONSE_ERROR;// 如果请求行不完整，返回错误
     }
-    *line_end = '\0';
+    *line_end = '\0';// 将请求行的结尾替换为字符串结束符，以便使用 strtok 分割
 
-    char *method = strtok(copy, " ");
-    char *path = strtok(NULL, " ");
+    char *method = strtok(copy, " ");// 获取请求方法
+    char *path = strtok(NULL, " ");// 获取请求路径
     if ((method == NULL) || (path == NULL)) {
         free(copy);
         return HTTP_RESPONSE_ERROR;
@@ -230,7 +231,7 @@ int build_http_response(const char *request,
                 "cgi_query",
                 fd_string,
                 NULL);
-            _exit(127);
+            _exit(127);// If execl fails, exit child process with error code
         }
 
         rc = (pid < 0) ? -1 : HTTP_RESPONSE_CGI_HANDOFF;

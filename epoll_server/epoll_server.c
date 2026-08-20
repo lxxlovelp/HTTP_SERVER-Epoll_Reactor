@@ -10,12 +10,15 @@
 #include "../network/socket.h"
 #include "epoll_server.h"
 #include "Thread_pool.h"
+#include <sys/eventfd.h>
+#include <stdatomic.h>
 
 
 #define LISTENER_TAG UINT64_C(1)
 
 typedef struct {
     int fd;
+    atomic_int ref;// 连接引用计数，确保在多线程环境下安全释放资源
     char request[MAX_REQUEST_SIZE + 1];
     size_t request_len;
     char *response;
@@ -23,25 +26,33 @@ typedef struct {
     size_t response_sent;
 } Connection;
 
+typedef struct {
+    int epoll_fd;
+    Connection *conn;
+    size_t request_len;
+} QueueResponseTask;
+
 static struct epoll_event events[MAX_EVENTS];
+
+
+static void release_connection(Connection *conn)
+{
+    if (atomic_fetch_sub(&conn->ref,1) == 1)
+    {
+        free(conn->response);
+        free(conn);
+    }
+}
 
 
 static void close_connection(int epoll_fd, Connection *conn)
 {
     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
     close(conn->fd);
-    free(conn->response);
-    free(conn);
+    release_connection(conn);
 }
 
 
-static int modify_connection_events(int epoll_fd, Connection *conn, uint32_t mask)
-{
-    struct epoll_event ev = {0};
-    ev.events = mask | EPOLLRDHUP;// 保留 EPOLLRDHUP 事件，避免客户端关闭连接时无法检测
-    ev.data.ptr = conn;
-    return epoll_ctl(epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev);
-}
 
 
 
@@ -52,7 +63,7 @@ static int add_connection(int epoll_fd, int fd)
         return -1;
     }
     conn->fd = fd;
-
+    atomic_init(&conn->ref, 1);   // 初始引用：epoll线程持有
     struct epoll_event ev = {0};// 初始化 epoll_event 结构体
     ev.events = EPOLLIN | EPOLLRDHUP;
     ev.data.ptr = conn;// 将 Connection 结构体指针存储在 epoll_event 的 data.ptr 中，以便在事件触发时访问连接状态
@@ -147,7 +158,18 @@ static int queue_response(int epoll_fd, Connection *conn, size_t request_len)
 }
 
 
-static int read_client(int epoll_fd, Connection *conn)
+static void *queue_response_task(void *arg)
+{
+    QueueResponseTask *task = arg;
+
+    queue_response(task->epoll_fd, task->conn, task->request_len);
+    release_connection(task->conn);
+    free(task);
+    return NULL;
+}
+
+
+static int read_client(int epoll_fd, Connection *conn,ThreadPool *pool)
 {
     for (;;) {
         if (conn->request_len == MAX_REQUEST_SIZE) {// 请求缓冲区已满，无法继续读取
@@ -158,14 +180,30 @@ static int read_client(int epoll_fd, Connection *conn)
         if (n > 0) {
             conn->request_len += (size_t)n;
             conn->request[conn->request_len] = '\0';
+            
             ssize_t request_len = complete_http_request(conn->request, conn->request_len);
             if (request_len < 0) {
                 return -1;
             }
             if (request_len > 0) {
-                return queue_response(epoll_fd, conn, (size_t)request_len);
+
+                QueueResponseTask *task = malloc(sizeof(*task));
+                    if (task == NULL) {
+                        return -1;
+                    }
+                    task->epoll_fd = epoll_fd;
+                    task->conn = conn; 
+                    task->request_len = (size_t)request_len;
+                    atomic_fetch_add(&conn->ref, 1);   // worker 增加一个引用
+
+                if (threadpool_add_task(pool,  queue_response_task, task) != 0) {
+                    atomic_fetch_sub(&conn->ref, 1); // 添加失败，撤销引用
+                    free(task);
+                    return -1;
+                }
+                return 0;                // return queue_response(epoll_fd, conn, (size_t)request_len);
             }
-            continue;
+            continue;// 请求不完整，继续读取
         }
         if (n == 0) {
             return -1;
@@ -234,10 +272,10 @@ int epoll_wait_loop(int epoll_fd, int listen_fd,ThreadPool* pool)
             Connection *newconn = events[i].data.ptr;
 
             uint32_t ev = events[i].events;
-            if (ev & (EPOLLERR | EPOLLHUP)) {
+            if (ev & (EPOLLERR)) {
                 close_connection(epoll_fd, newconn);
             } else if (ev & EPOLLIN) {
-                if (read_client(epoll_fd, newconn) == -1) close_connection(epoll_fd, newconn);
+                if (read_client(epoll_fd, newconn,pool) == -1) close_connection(epoll_fd, newconn);
             } else if (ev & EPOLLOUT) {
                 int written = write_client(newconn);
                 if (written != 0) close_connection(epoll_fd, newconn);
