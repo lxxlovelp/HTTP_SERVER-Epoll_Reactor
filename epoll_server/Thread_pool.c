@@ -49,7 +49,7 @@ static void *worker_thread_routine(void *arg)
 ThreadPool* threadpool_create(int thread_count) {
     if (thread_count <= 0) {
         thread_count = 4;
-    }// If the number of threads is not specified, default to 4 threads
+    }
 
     ThreadPool *pool = (ThreadPool *)malloc(sizeof(ThreadPool));
     if (pool == NULL) {
@@ -64,15 +64,17 @@ ThreadPool* threadpool_create(int thread_count) {
     pthread_mutex_init(&pool->lock, NULL);
     pthread_cond_init(&pool->notify, NULL);
 
-    pool->threads = (pthread_t *)malloc(sizeof(pthread_t) * thread_count);// Allocate memory for thread IDs
+    //使用 calloc 分配内存，避免垃圾值导致 pthread_join 崩溃
+    pool->threads = (pthread_t *)calloc(thread_count, sizeof(pthread_t));
     if (!pool->threads) {
         free(pool);
         return NULL;
     }
 
     for (int i = 0; i < thread_count; i++) {
-        // 这样工作线程才能拿到同一个线程池对象，访问共享的任务队列、互斥锁、条件变量等：
         if (pthread_create(&pool->threads[i], NULL, worker_thread_routine, (void *)pool) != 0) {
+            // 【修改点 2】: 如果中途创建失败，只需清理已成功创建的 i 个线程
+            pool->thread_count = i; 
             threadpool_destroy(pool);
             return NULL;
         }
@@ -130,7 +132,6 @@ int threadpool_destroy(ThreadPool *pool) {
     }
 
     free(pool->threads);
-
     Task *cur = pool->queue_head;
     while (cur) {
         Task *next = cur->next;

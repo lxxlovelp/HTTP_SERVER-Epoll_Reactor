@@ -139,19 +139,35 @@ static ssize_t complete_http_request(const char *buf, size_t len)
 }
 
 
+static int modify_connection_events(int epoll_fd, Connection *conn, uint32_t mask)
+{
+    struct epoll_event ev = {0};
+    ev.events = mask | EPOLLRDHUP;// 保留 EPOLLRDHUP 事件，避免客户端关闭连接时无法检测
+    ev.data.ptr = conn;
+    return epoll_ctl(epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev);
+}
+
+
 static int queue_response(int epoll_fd, Connection *conn, size_t request_len)
 {
     int rc = build_http_response(conn->request, request_len, conn->fd,
                              &conn->response, &conn->response_len);
     if (rc == HTTP_RESPONSE_CGI_HANDOFF) {
-        /* The CGI child inherited the socket; the Reactor releases its copy. */
         close_connection(epoll_fd, conn);
         return 0;
     }
+    // 如果构建响应失败，直接关闭连接
     if (rc != HTTP_RESPONSE_READY || conn->response == NULL) {
         return -1;
     }
-    if (modify_connection_events(epoll_fd, conn, EPOLLOUT) == -1) {// 修改 epoll 事件为可写
+    
+    // 替换原本的 modify_connection_events 调用
+    // 重新注册该 fd 的 EPOLLOUT 事件，并必须带上 EPOLLONESHOT 重新激活 epoll 监听
+    struct epoll_event ev = {0};
+    ev.events = EPOLLOUT | EPOLLRDHUP | EPOLLONESHOT;
+    ev.data.ptr = conn;
+    
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev) == -1) {
         return -1;
     }
     return 0;
