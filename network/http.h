@@ -13,6 +13,6 @@
  * writes to client_fd; that is deliberately left to the epoll Reactor.
  */
 int build_http_response(const char *request, size_t request_len, int client_fd,
-                        char **response, size_t *response_len);
+                        char **response, size_t *response_len, int *keep_alive);
 
 #endif

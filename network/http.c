@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -10,6 +11,7 @@
 #include "../Tool/json.h"
 #include "../Tool/send.h"
 #include "http.h"
+
 
 #define STATIC_ROOT "/home/xingxinliao/project/Http_Server_Project/Resource"
 
@@ -24,7 +26,7 @@ static int make_response(int status,
     int header_len = snprintf(
         NULL,
         0,
-        "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: keep-alive\r\n\r\n",
         status,
         reason,
         type,
@@ -43,7 +45,7 @@ static int make_response(int status,
     snprintf(
         *response,
         response_size,
-        "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: keep-alive\r\n\r\n",
         status,
         reason,
         type,
@@ -156,19 +158,36 @@ static int static_response(const char *path, char **response, size_t *response_l
 }
 
 
-
-
-
 int build_http_response(const char *request,
                         size_t request_len,
                         int client_fd,
                         char **response,
-                        size_t *response_len)
+                        size_t *response_len,
+                        int *keep_alive
+                         )
 {
-    (void)request_len;//
+    (void)request_len;
 
     *response = NULL;
     *response_len = 0;
+
+    // 默认设置为短连接 (HTTP/1.0 默认行为)
+    // 如果你要完全遵守 HTTP/1.1，默认应该是 1，这里以基础实现为例
+    *keep_alive = 0;
+
+    // 解析请求头，判断是否有 Connection: keep-alive
+    // 简单粗暴的做法：使用 strcasestr 忽略大小写查找
+    // 注意：严谨的做法应该是逐行解析 HTTP Header
+    const char *conn_header = strcasestr(request, "Connection:"); 
+        
+        if (conn_header) {
+            if (strcasestr(conn_header, "keep-alive")) {
+                *keep_alive = 1;
+            } else if (strcasestr(conn_header, "close")) {
+                *keep_alive = 0;
+            }
+        }
+
 
     char *copy = strdup(request);// 复制请求字符串，以便使用 strtok 分割
     if (copy == NULL) {
@@ -182,8 +201,11 @@ int build_http_response(const char *request,
     }
     *line_end = '\0';// 将请求行的结尾替换为字符串结束符，以便使用 strtok 分割
 
-    char *method = strtok(copy, " ");// 获取请求方法
-    char *path = strtok(NULL, " ");// 获取请求路径
+    // 【使用线程安全的 strtok_r】
+    char *saveptr; // 用来保存字符串切割的内部状态
+    char *method = strtok_r(copy, " ", &saveptr);
+    char *path = strtok_r(NULL, " ", &saveptr);
+    
     if ((method == NULL) || (path == NULL)) {
         free(copy);
         return HTTP_RESPONSE_ERROR;

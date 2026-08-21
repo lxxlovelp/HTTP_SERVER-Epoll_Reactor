@@ -14,9 +14,7 @@
 #include <stdatomic.h>
 
 
-#define LISTENER_TAG UINT64_C(1)
-
-typedef struct {
+ typedef struct {
     int fd;
     atomic_int ref;// 连接引用计数，确保在多线程环境下安全释放资源
     char request[MAX_REQUEST_SIZE + 1];
@@ -24,6 +22,7 @@ typedef struct {
     char *response;
     size_t response_len;
     size_t response_sent;
+    int keep_alive;
 } Connection;
 
 typedef struct {
@@ -33,7 +32,6 @@ typedef struct {
 } QueueResponseTask;
 
 static struct epoll_event events[MAX_EVENTS];
-
 
 static void release_connection(Connection *conn)
 {
@@ -51,9 +49,6 @@ static void close_connection(int epoll_fd, Connection *conn)
     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
     release_connection(conn);
 }
-
-
-
 
 
 static int add_connection(int epoll_fd, int fd)
@@ -150,15 +145,15 @@ static int modify_connection_events(int epoll_fd, Connection *conn, uint32_t mas
 
 static int queue_response(int epoll_fd, Connection *conn, size_t request_len)
 {
+   
     int rc = build_http_response(conn->request, request_len, conn->fd,
-                             &conn->response, &conn->response_len);
-    if (rc == HTTP_RESPONSE_CGI_HANDOFF) {
+                             &conn->response, &conn->response_len,&conn->keep_alive);
+    if (rc == HTTP_RESPONSE_CGI_HANDOFF) {// 如果是 CGI 处理，直接关闭连接
         close_connection(epoll_fd, conn);
         return 0;
     }
     // 如果构建响应失败，直接关闭连接
     if (rc != HTTP_RESPONSE_READY || conn->response == NULL) {
-        close_connection(epoll_fd,  conn);//避免fd泄漏
         return -1;
     }
     // 替换原本的 modify_connection_events 调用
@@ -178,7 +173,10 @@ static void *queue_response_task(void *arg)
 {
     QueueResponseTask *task = arg;
 
-    queue_response(task->epoll_fd, task->conn, task->request_len);
+    if (queue_response(task->epoll_fd, task->conn, task->request_len) == -1) {
+        // 正确的做法：工作线程发现错误，替主线程执行 close_connection 
+        close_connection(task->epoll_fd, task->conn); 
+    }
     release_connection(task->conn);
     free(task);
     return NULL;
@@ -237,7 +235,6 @@ static int read_client(int epoll_fd, Connection *conn,ThreadPool *pool)
         }
     }
 }
-
 
 
 static int write_client(int epoll_fd,Connection *conn)
@@ -300,10 +297,34 @@ int epoll_wait_loop(int epoll_fd, int listen_fd,ThreadPool* pool)
             if (ev & (EPOLLERR)) {
                 close_connection(epoll_fd, newconn);
             } else if (ev & EPOLLIN) {
-                if (read_client(epoll_fd, newconn,pool) == -1) close_connection(epoll_fd, newconn);
+                if (read_client(epoll_fd, newconn,pool) == -1) {
+                    close_connection(epoll_fd, newconn);
+                }
             } else if (ev & EPOLLOUT) {
                 int written = write_client(epoll_fd,newconn);
-                if (written != 0) close_connection(epoll_fd, newconn);
+                if (written==1) {
+                    if (newconn->keep_alive) {
+                        free(newconn->response);
+                        newconn->response = NULL;
+                        // 2. 重置读写索引
+                        newconn->request_len = 0;
+                        newconn->response_len = 0;
+                        newconn->response_sent = 0;
+                        newconn->request[0] = '\0';          
+                        // 3. 重新上膛！将事件改回 EPOLLIN，继续监听新请求
+                        struct epoll_event ev_reset = {0};
+                        ev_reset.events = EPOLLIN | EPOLLRDHUP | EPOLLONESHOT;
+                        ev_reset.data.ptr = newconn;
+                        epoll_ctl(epoll_fd, EPOLL_CTL_MOD, newconn->fd, &ev_reset); 
+                    }
+                    else{
+                        // 【短连接逻辑】：对方要求断开，直接关闭
+                        close_connection(epoll_fd, newconn);
+                    }
+                }
+                else if (written != 0){
+                     close_connection(epoll_fd, newconn);
+                }
             } else if (ev & EPOLLRDHUP) {
                 close_connection(epoll_fd, newconn);
             }

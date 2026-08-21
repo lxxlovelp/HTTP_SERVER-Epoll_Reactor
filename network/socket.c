@@ -9,7 +9,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-
 //设置非阻塞
 int set_nonblock(int fd)
 {
@@ -32,8 +31,6 @@ int set_nonblock(int fd)
     return 0;
 }
 
-
-
 int init_listen_server(uint16_t port)
 {
 
@@ -44,7 +41,6 @@ int init_listen_server(uint16_t port)
         perror("socket");
         return -1;
     }
-
     // 地址复用,地址复用（通常用 SO_REUSEADDR）是给 bind() 用的，主要作用是，允许一个端口在 socket 还处于 TIME_WAIT 状态时被重新绑定
     int reuse=1;
 
@@ -72,7 +68,6 @@ int init_listen_server(uint16_t port)
         close(tcp_socket);
         return -1;
     }
-
 
     ret =listen(tcp_socket,128);//监听套接字，等待客户端连接请求，第二个参数表示最大连接数
 
