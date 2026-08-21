@@ -39,6 +39,7 @@ static void release_connection(Connection *conn)
 {
     if (atomic_fetch_sub(&conn->ref,1) == 1)
     {
+        close(conn->fd);
         free(conn->response);
         free(conn);
     }
@@ -48,7 +49,6 @@ static void release_connection(Connection *conn)
 static void close_connection(int epoll_fd, Connection *conn)
 {
     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
-    close(conn->fd);
     release_connection(conn);
 }
 
@@ -65,7 +65,7 @@ static int add_connection(int epoll_fd, int fd)
     conn->fd = fd;
     atomic_init(&conn->ref, 1);   // 初始引用：epoll线程持有
     struct epoll_event ev = {0};// 初始化 epoll_event 结构体
-    ev.events = EPOLLIN | EPOLLRDHUP;
+    ev.events = EPOLLIN | EPOLLRDHUP |EPOLLONESHOT;
     ev.data.ptr = conn;// 将 Connection 结构体指针存储在 epoll_event 的 data.ptr 中，以便在事件触发时访问连接状态
     if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) == -1) {
         free(conn);
@@ -158,9 +158,9 @@ static int queue_response(int epoll_fd, Connection *conn, size_t request_len)
     }
     // 如果构建响应失败，直接关闭连接
     if (rc != HTTP_RESPONSE_READY || conn->response == NULL) {
+        close_connection(epoll_fd,  conn);//避免fd泄漏
         return -1;
     }
-    
     // 替换原本的 modify_connection_events 调用
     // 重新注册该 fd 的 EPOLLOUT 事件，并必须带上 EPOLLONESHOT 重新激活 epoll 监听
     struct epoll_event ev = {0};
@@ -225,6 +225,10 @@ static int read_client(int epoll_fd, Connection *conn,ThreadPool *pool)
             return -1;
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK) {// 非阻塞套接字没有数据可读，等待下一次可读事件
+            struct epoll_event ev = {0};
+            ev.events = EPOLLIN | EPOLLRDHUP | EPOLLONESHOT;
+            ev.data.ptr = conn;
+            epoll_ctl(epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev);
             return 0;
         }
         if (errno != EINTR) {// 如果不是被信号中断，打印错误信息并返回 -1
@@ -236,7 +240,7 @@ static int read_client(int epoll_fd, Connection *conn,ThreadPool *pool)
 
 
 
-static int write_client(Connection *conn)
+static int write_client(int epoll_fd,Connection *conn)
 {
     while (conn->response_sent < conn->response_len) {
         ssize_t n = send(conn->fd, conn->response + conn->response_sent,
@@ -246,6 +250,11 @@ static int write_client(Connection *conn)
             continue;
         }
         if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {// 非阻塞套接字无法立即发送数据，等待下一次可写事件
+            // 【补上这段重新监听的代码】
+            struct epoll_event ev = {0};
+            ev.events = EPOLLOUT | EPOLLRDHUP | EPOLLONESHOT;
+            ev.data.ptr = conn;
+            epoll_ctl(epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev);
             return 0;
         }
         if (n == -1 && errno == EINTR) {// 被信号中断，继续发送
@@ -293,7 +302,7 @@ int epoll_wait_loop(int epoll_fd, int listen_fd,ThreadPool* pool)
             } else if (ev & EPOLLIN) {
                 if (read_client(epoll_fd, newconn,pool) == -1) close_connection(epoll_fd, newconn);
             } else if (ev & EPOLLOUT) {
-                int written = write_client(newconn);
+                int written = write_client(epoll_fd,newconn);
                 if (written != 0) close_connection(epoll_fd, newconn);
             } else if (ev & EPOLLRDHUP) {
                 close_connection(epoll_fd, newconn);
