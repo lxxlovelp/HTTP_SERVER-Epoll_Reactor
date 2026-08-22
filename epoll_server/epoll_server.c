@@ -12,28 +12,13 @@
 #include "Thread_pool.h"
 #include <sys/eventfd.h>
 #include <stdatomic.h>
-
-
- typedef struct {
-    int fd;
-    atomic_int ref;// 连接引用计数，确保在多线程环境下安全释放资源
-    char request[MAX_REQUEST_SIZE + 1];
-    size_t request_len;
-    char *response;
-    size_t response_len;
-    size_t response_sent;
-    int keep_alive;
-} Connection;
-
-typedef struct {
-    int epoll_fd;
-    Connection *conn;
-    size_t request_len;
-} QueueResponseTask;
+#include "timer_heap.h"
+#include "function.h"
+#include <stdint.h>
 
 static struct epoll_event events[MAX_EVENTS];
 
-static void release_connection(Connection *conn)
+void release_connection(Connection *conn)
 {
     if (atomic_fetch_sub(&conn->ref,1) == 1)
     {
@@ -44,14 +29,14 @@ static void release_connection(Connection *conn)
 }
 
 
-static void close_connection(int epoll_fd, Connection *conn)
+ void close_connection(int epoll_fd, Connection *conn)
 {
     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
     release_connection(conn);
 }
 
 
-static int add_connection(int epoll_fd, int fd)
+int add_connection(int epoll_fd, int fd,TimerHeap *heap)
 {
     Connection *conn = calloc(1, sizeof(*conn));
     if (conn == NULL) {
@@ -59,6 +44,8 @@ static int add_connection(int epoll_fd, int fd)
     }
     conn->fd = fd;
     atomic_init(&conn->ref, 1);   // 初始引用：epoll线程持有
+    // 新连接接入立即开启 15 秒超时倒计时
+    add_or_refresh_timer(heap, epoll_fd, conn);
     struct epoll_event ev = {0};// 初始化 epoll_event 结构体
     ev.events = EPOLLIN | EPOLLRDHUP |EPOLLONESHOT;
     ev.data.ptr = conn;// 将 Connection 结构体指针存储在 epoll_event 的 data.ptr 中，以便在事件触发时访问连接状态
@@ -68,7 +55,6 @@ static int add_connection(int epoll_fd, int fd)
     }
     return 0;
 }
-
 
 int add_fd_to_epoll(int epoll_fd, int fd)
 {
@@ -83,58 +69,7 @@ int add_fd_to_epoll(int epoll_fd, int fd)
 }
 
 
-/// 解析 HTTP 请求，返回请求总长度（包括请求头和请求体），如果请求不完整返回 0，如果请求无效返回 -1
-static ssize_t complete_http_request(const char *buf, size_t len)
-{
-    const char *header_end = NULL;
-
-    for (size_t i = 3; i < len; ++i) {
-        if (memcmp(buf + i - 3, "\r\n\r\n", 4) == 0) {
-            header_end = buf + i + 1;// 指向请求头+请求行结束位置
-            break;
-        }
-    }
-    if (header_end == NULL) {// 请求头未完整接收
-        if (len >= MAX_REQUEST_SIZE) {// 请求头过大，超过最大请求大小
-            return -1;
-        }
-        return 0;
-    }
-
-
-    size_t header_len = (size_t)(header_end - buf);// 请求头长度
-    size_t content_len = 0;// 请求体长度
-    const char *line = buf;
-
-    while (line < header_end) {
-
-        const char *line_end = strstr(line, "\r\n");
-        if (line_end == NULL || line_end >= header_end) {// 处理最请求行异常情况
-            break;
-        }
-
-        if (strncasecmp(line, "Content-Length:", 15) == 0) {// 找到 Content-Length 头部
-            char *end = NULL;
-            unsigned long value = strtoul(line + 15, &end, 10);// 解析请求体长度
-            if (end == line + 15 || end > line_end || value > MAX_REQUEST_SIZE) {// 无效的 Content-Length
-                return -1;
-            }
-            content_len = (size_t)value;
-        }
-
-        line = line_end + 2;// 移动到下一行
-    }
-
-
-    if (content_len > MAX_REQUEST_SIZE - header_len) {
-        return -1;
-    }
-    size_t total = header_len + content_len;
-    return len >= total ? (ssize_t)total : 0;// 返回请求总长度，如果请求不完整返回 0
-}
-
-
-static int modify_connection_events(int epoll_fd, Connection *conn, uint32_t mask)
+int modify_connection_events(int epoll_fd, Connection *conn, uint32_t mask)
 {
     struct epoll_event ev = {0};
     ev.events = mask | EPOLLRDHUP;// 保留 EPOLLRDHUP 事件，避免客户端关闭连接时无法检测
@@ -143,132 +78,19 @@ static int modify_connection_events(int epoll_fd, Connection *conn, uint32_t mas
 }
 
 
-static int queue_response(int epoll_fd, Connection *conn, size_t request_len)
-{
-   
-    int rc = build_http_response(conn->request, request_len, conn->fd,
-                             &conn->response, &conn->response_len,&conn->keep_alive);
-    if (rc == HTTP_RESPONSE_CGI_HANDOFF) {// 如果是 CGI 处理，直接关闭连接
-        close_connection(epoll_fd, conn);
-        return 0;
-    }
-    // 如果构建响应失败，直接关闭连接
-    if (rc != HTTP_RESPONSE_READY || conn->response == NULL) {
-        return -1;
-    }
-    // 替换原本的 modify_connection_events 调用
-    // 重新注册该 fd 的 EPOLLOUT 事件，并必须带上 EPOLLONESHOT 重新激活 epoll 监听
-    struct epoll_event ev = {0};
-    ev.events = EPOLLOUT | EPOLLRDHUP | EPOLLONESHOT;
-    ev.data.ptr = conn;
-    
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev) == -1) {
-        return -1;
-    }
-    return 0;
-}
-
-
-static void *queue_response_task(void *arg)
-{
-    QueueResponseTask *task = arg;
-
-    if (queue_response(task->epoll_fd, task->conn, task->request_len) == -1) {
-        // 正确的做法：工作线程发现错误，替主线程执行 close_connection 
-        close_connection(task->epoll_fd, task->conn); 
-    }
-    release_connection(task->conn);
-    free(task);
-    return NULL;
-}
-
-
-static int read_client(int epoll_fd, Connection *conn,ThreadPool *pool)
-{
-    for (;;) {
-        if (conn->request_len == MAX_REQUEST_SIZE) {// 请求缓冲区已满，无法继续读取
-            return -1;
-        }
-        ssize_t n = recv(conn->fd, conn->request + conn->request_len,
-                         MAX_REQUEST_SIZE - conn->request_len, 0);// 从客户端套接字读取数据到请求缓冲区
-        if (n > 0) {
-            conn->request_len += (size_t)n;
-            conn->request[conn->request_len] = '\0';
-            
-            ssize_t request_len = complete_http_request(conn->request, conn->request_len);
-            if (request_len < 0) {
-                return -1;
-            }
-            if (request_len > 0) {
-
-                QueueResponseTask *task = malloc(sizeof(*task));
-                    if (task == NULL) {
-                        return -1;
-                    }
-                    task->epoll_fd = epoll_fd;
-                    task->conn = conn; 
-                    task->request_len = (size_t)request_len;
-                    atomic_fetch_add(&conn->ref, 1);   // worker 增加一个引用
-
-                if (threadpool_add_task(pool,  queue_response_task, task) != 0) {
-                    atomic_fetch_sub(&conn->ref, 1); // 添加失败，撤销引用
-                    free(task);
-                    return -1;
-                }
-                return 0;                // return queue_response(epoll_fd, conn, (size_t)request_len);
-            }
-            continue;// 请求不完整，继续读取
-        }
-        if (n == 0) {
-            return -1;
-        }
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {// 非阻塞套接字没有数据可读，等待下一次可读事件
-            struct epoll_event ev = {0};
-            ev.events = EPOLLIN | EPOLLRDHUP | EPOLLONESHOT;
-            ev.data.ptr = conn;
-            epoll_ctl(epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev);
-            return 0;
-        }
-        if (errno != EINTR) {// 如果不是被信号中断，打印错误信息并返回 -1
-            perror("recv");
-            return -1;
-        }
-    }
-}
-
-
-static int write_client(int epoll_fd,Connection *conn)
-{
-    while (conn->response_sent < conn->response_len) {
-        ssize_t n = send(conn->fd, conn->response + conn->response_sent,
-                         conn->response_len - conn->response_sent, MSG_NOSIGNAL);
-        if (n > 0) {
-            conn->response_sent += (size_t)n;
-            continue;
-        }
-        if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {// 非阻塞套接字无法立即发送数据，等待下一次可写事件
-            // 【补上这段重新监听的代码】
-            struct epoll_event ev = {0};
-            ev.events = EPOLLOUT | EPOLLRDHUP | EPOLLONESHOT;
-            ev.data.ptr = conn;
-            epoll_ctl(epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev);
-            return 0;
-        }
-        if (n == -1 && errno == EINTR) {// 被信号中断，继续发送
-            continue;
-        }
-        return -1;
-    }
-    return 1;
-}
-
-
 int epoll_wait_loop(int epoll_fd, int listen_fd,ThreadPool* pool)
 {   
-   
     (void)listen_fd;
+    TimerHeap *timer_heap = timer_heap_create(1024);
+    if (!timer_heap) {
+        fprintf(stderr, "Failed to create timer heap\n");
+        return -1;
+    }
+    
     for (;;) {
-        int n = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+        // 根据堆顶任务计算最近一个超时的剩余毫秒数
+        int timeout_ms = timer_heap_get_next_timeout(timer_heap);
+        int n = epoll_wait(epoll_fd, events, MAX_EVENTS, timeout_ms);
         if (n == -1) {
             if (errno == EINTR) continue;
             perror("epoll_wait");
@@ -283,7 +105,7 @@ int epoll_wait_loop(int epoll_fd, int listen_fd,ThreadPool* pool)
                         if (errno != EINTR) perror("accept");
                         break;
                     }
-                    if (set_nonblock(client_fd) == -1 || add_connection(epoll_fd, client_fd) == -1) {// 添加新连接到 epoll
+                    if  (set_nonblock(client_fd) == -1 || add_connection(epoll_fd, client_fd, timer_heap) == -1) {// 添加新连接到 epoll
                         perror("add client to epoll");
                         close(client_fd);
                     }
@@ -297,25 +119,44 @@ int epoll_wait_loop(int epoll_fd, int listen_fd,ThreadPool* pool)
             if (ev & (EPOLLERR)) {
                 close_connection(epoll_fd, newconn);
             } else if (ev & EPOLLIN) {
-                if (read_client(epoll_fd, newconn,pool) == -1) {
+                if (read_client(epoll_fd, newconn,pool,timer_heap) == -1) {
                     close_connection(epoll_fd, newconn);
                 }
             } else if (ev & EPOLLOUT) {
                 int written = write_client(epoll_fd,newconn);
                 if (written==1) {
                     if (newconn->keep_alive) {
+                     // 释放本次已发出的响应报文
                         free(newconn->response);
                         newconn->response = NULL;
-                        // 2. 重置读写索引
-                        newconn->request_len = 0;
+
+                        // 粘包平移：将缓冲区里未处理的后续请求往前挪
+                        size_t remaining = newconn->request_len - newconn->parsed_len;
+                        if (remaining > 0) {
+                            memmove(newconn->request, newconn->request + newconn->parsed_len, remaining);
+                        }
+                        newconn->request_len = remaining;
+                        newconn->request[remaining] = '\0';
+                        newconn->parsed_len = 0;
                         newconn->response_len = 0;
                         newconn->response_sent = 0;
-                        newconn->request[0] = '\0';          
-                        // 3. 重新上膛！将事件改回 EPOLLIN，继续监听新请求
-                        struct epoll_event ev_reset = {0};
-                        ev_reset.events = EPOLLIN | EPOLLRDHUP | EPOLLONESHOT;
-                        ev_reset.data.ptr = newconn;
-                        epoll_ctl(epoll_fd, EPOLL_CTL_MOD, newconn->fd, &ev_reset); 
+
+                        // 发完后刷新定时器
+                        add_or_refresh_timer(timer_heap, epoll_fd, newconn);
+
+                        // 检查平移后的数据是否已包含完整的下一条 HTTP 请求
+                        ssize_t next_req_len = complete_http_request(newconn->request, newconn->request_len);
+                        if (next_req_len > 0) {
+                            if (dispatch_task(epoll_fd, newconn, (size_t)next_req_len, pool) != 0) {
+                                close_connection(epoll_fd, newconn);
+                            }
+                        } else {
+                            // 重新上膛监听 EPOLLIN
+                            struct epoll_event ev_reset = {0};
+                            ev_reset.events = EPOLLIN | EPOLLRDHUP | EPOLLONESHOT;
+                            ev_reset.data.ptr = newconn;
+                            epoll_ctl(epoll_fd, EPOLL_CTL_MOD, newconn->fd, &ev_reset);
+                        }
                     }
                     else{
                         // 【短连接逻辑】：对方要求断开，直接关闭
@@ -329,5 +170,10 @@ int epoll_wait_loop(int epoll_fd, int listen_fd,ThreadPool* pool)
                 close_connection(epoll_fd, newconn);
             }
         }
+        timer_heap_tick(timer_heap);// 处理到期任务
     }
+
+    timer_heap_destroy(timer_heap);
+    return 0;
+
 }

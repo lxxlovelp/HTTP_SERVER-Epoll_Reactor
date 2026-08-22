@@ -8,7 +8,8 @@ CGI_TARGET = CGI/cgi_query
 # 主程序源码（移除 CGI/cgi_query.c）
 MAIN_SRCS = main.c network/socket.c epoll_server/epoll_server.c network/http.c \
             Tool/json.c Tool/send.c /home/xingxinliao/lab/cJSON/cJSON.c \
-            Tool/no_find.c Tool/process_create.c epoll_server/Thread_pool.c
+            Tool/no_find.c Tool/process_create.c epoll_server/Thread_pool.c \
+			epoll_server/function.c epoll_server/timer_heap.c
 
 # CGI 源码
 CGI_SRCS = CGI/cgi_query.c

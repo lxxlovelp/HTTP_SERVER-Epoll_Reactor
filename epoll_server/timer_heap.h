@@ -13,10 +13,11 @@ typedef struct {
 } TimerNode;
 
 typedef struct {
-    TimerNode *array;
-    size_t capacity;
-    size_t size;
-} TimerHeap;
+    TimerNode *array;//存放闹钟的动态数组
+    size_t capacity;// 数组最多能装多少个闹钟（容量）
+    size_t size;// 当前数组中有多少个闹钟（大小）
+    }TimerHeap;
+
 
 uint64_t get_current_time_ms(void);
 TimerHeap* timer_heap_create(size_t capacity);

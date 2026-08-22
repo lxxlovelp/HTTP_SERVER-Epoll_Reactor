@@ -12,7 +12,6 @@
 #include "../Tool/send.h"
 #include "http.h"
 
-
 #define STATIC_ROOT "/home/xingxinliao/project/Http_Server_Project/Resource"
 
 static int make_response(int status,
@@ -275,4 +274,55 @@ int build_http_response(const char *request,
     }
 
     return rc;
+}
+
+
+// 解析 HTTP 请求，返回请求总长度（包括请求头和请求体），如果请求不完整返回 0，如果请求无效返回 -1
+ ssize_t complete_http_request(const char *buf, size_t len)
+{
+    const char *header_end = NULL;
+
+    for (size_t i = 3; i < len; ++i) {
+        if (memcmp(buf + i - 3, "\r\n\r\n", 4) == 0) {
+            header_end = buf + i + 1;// 指向请求头+请求行结束位置
+            break;
+        }
+    }
+    if (header_end == NULL) {// 请求头未完整接收
+        if (len >= MAX_REQUEST_SIZE) {// 请求头过大，超过最大请求大小
+            return -1;
+        }
+        return 0;
+    }
+
+
+    size_t header_len = (size_t)(header_end - buf);// 请求头长度
+    size_t content_len = 0;// 请求体长度
+    const char *line = buf;
+
+    while (line < header_end) {
+
+        const char *line_end = strstr(line, "\r\n");
+        if (line_end == NULL || line_end >= header_end) {// 处理最请求行异常情况
+            break;
+        }
+
+        if (strncasecmp(line, "Content-Length:", 15) == 0) {// 找到 Content-Length 头部
+            char *end = NULL;
+            unsigned long value = strtoul(line + 15, &end, 10);// 解析请求体长度
+            if (end == line + 15 || end > line_end || value > MAX_REQUEST_SIZE) {// 无效的 Content-Length
+                return -1;
+            }
+            content_len = (size_t)value;
+        }
+
+        line = line_end + 2;// 移动到下一行
+    }
+
+
+    if (content_len > MAX_REQUEST_SIZE - header_len) {
+        return -1;
+    }
+    size_t total = header_len + content_len;
+    return len >= total ? (ssize_t)total : 0;// 返回请求总长度，如果请求不完整返回 0
 }
